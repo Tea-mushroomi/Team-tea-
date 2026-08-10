@@ -42,10 +42,9 @@ const STYLES = {
     "Исламская архитектура": "islamic architecture, geometric patterns, horseshoe arches, minaret, dome"
 };
 
-const NEG = "people, humans, crowd, faces, animals, blurry, low quality, deformed, watermark, text";
-const BLD = "architecture only, building exterior, facade, no people, no interior, photorealistic, 8k, ultra detailed";
+const NEG = "people,humans,crowd,faces,animals,blurry,low quality,deformed,watermark,text";
+const BLD = "architecture only,building exterior,facade,no people,no interior,photorealistic,8k";
 
-// ===== СОСТОЯНИЕ =====
 const S = {
     coins: +localStorage.getItem('hc') || 0,
     tea: +localStorage.getItem('tb') || 0,
@@ -66,103 +65,121 @@ const save = () => {
     localStorage.setItem('lrn', JSON.stringify(S.learn));
 };
 
-// ===== ГЕНЕРАЦИЯ ЧЕРЕЗ PUTER.JS (БЕСПЛАТНО, БЕЗ КЛЮЧЕЙ) =====
-async function generateImage(prompt, model) {
-    const fullPrompt = prompt + ', ' + BLD + ', negative: ' + NEG;
-    // puter.ai.txt2img возвращает HTMLImageElement
-    const imgElement = await puter.ai.txt2img(fullPrompt, false, model);
-    // Конвертируем в base64 через canvas
-    return new Promise((res, rej) => {
-        try {
-            const c = document.createElement('canvas');
-            let w = imgElement.naturalWidth || imgElement.width;
-            let h = imgElement.naturalHeight || imgElement.height;
-            const m = 800;
-            if (w > m || h > m) {
-                const r = Math.min(m / w, m / h);
-                w = Math.round(w * r);
-                h = Math.round(h * r);
+// ===== ГЕНЕРАЦИЯ ЧЕРЕЗ POLLINATIONS (БЕЗ КЛЮЧЕЙ) =====
+// Используем <img> тег напрямую — это обходит все CORS проблемы
+function generateViaImg(prompt, model) {
+    return new Promise((resolve, reject) => {
+        const fullPrompt = encodeURIComponent(prompt + ',' + BLD);
+        const neg = encodeURIComponent(NEG);
+        const seed = Math.floor(Math.random() * 999999);
+        const url = 'https://image.pollinations.ai/prompt/' + fullPrompt
+            + '?width=1024&height=1024&seed=' + seed
+            + '&nologo=true&negative=' + neg
+            + '&model=' + model;
+
+        // Создаём скрытый img элемент и добавляем в DOM
+        const img = document.createElement('img');
+        img.crossOrigin = 'anonymous';
+        img.style.display = 'none';
+        document.body.appendChild(img);
+
+        const timeout = setTimeout(() => {
+            img.remove();
+            reject(new Error('Таймаут 120с — сервер не ответил'));
+        }, 120000);
+
+        img.onload = () => {
+            clearTimeout(timeout);
+            try {
+                const c = document.createElement('canvas');
+                let w = img.naturalWidth;
+                let h = img.naturalHeight;
+                if (!w || !h) {
+                    img.remove();
+                    reject(new Error('Пустое изображение'));
+                    return;
+                }
+                const m = 800;
+                if (w > m || h > m) {
+                    const r = Math.min(m / w, m / h);
+                    w = Math.round(w * r);
+                    h = Math.round(h * r);
+                }
+                c.width = w;
+                c.height = h;
+                c.getContext('2d').drawImage(img, 0, 0, w, h);
+                const dataUrl = c.toDataURL('image/jpeg', 0.7);
+                img.remove();
+                resolve({ url: dataUrl, engine: model });
+            } catch (e) {
+                img.remove();
+                reject(e);
             }
-            c.width = w;
-            c.height = h;
-            c.getContext('2d').drawImage(imgElement, 0, 0, w, h);
-            res({
-                url: c.toDataURL('image/jpeg', 0.7),
-                engine: model
-            });
-        } catch (e) {
-            rej(e);
-        }
+        };
+
+        img.onerror = () => {
+            clearTimeout(timeout);
+            img.remove();
+            reject(new Error('Ошибка загрузки от ' + model));
+        };
+
+        img.src = url;
     });
 }
 
 async function genWithFallback(prompt) {
-    const models = [S.model, 'flux', 'gpt-image-1', 'dall-e-3', 'stable-diffusion-3-medium'];
-    // Убираем дубликаты
+    const models = [S.model, 'flux', 'turbo', 'sdxl'];
     const unique = [...new Set(models)];
     const errs = [];
     for (const m of unique) {
         try {
-            return await generateImage(prompt, m);
+            return await generateViaImg(prompt, m);
         } catch (e) {
             errs.push(m + ': ' + (e.message || 'unknown'));
-            console.warn(m + ' failed:', e);
+            console.warn(m + ' failed:', e.message);
         }
     }
-    throw new Error('Все модели недоступны:\n' + errs.join('\n'));
+    throw new Error('Все модели недоступны:\n' + errs.join('\n')
+        + '\n\nПопробуйте через минуту — бесплатный API имеет лимит 1 запрос / 15 сек.');
 }
 
-// ===== РЕСТАВРАЦИЯ (анализ фото + генерация восстановленной версии) =====
+// ===== РЕСТАВРАЦИЯ =====
 async function restoreImage(originalBase64, description, style) {
     const styleDesc = STYLES[style] || '';
-
-    // Анализируем пиксели оригинала
     const analysis = await new Promise((res) => {
         const img = new Image();
         img.onload = () => {
             const c = document.createElement('canvas');
-            c.width = 32;
-            c.height = 32;
+            c.width = 32; c.height = 32;
             const ctx = c.getContext('2d');
             ctx.drawImage(img, 0, 0, 32, 32);
             const data = ctx.getImageData(0, 0, 32, 32).data;
             let r = 0, g = 0, b = 0, n = 0;
             for (let i = 0; i < data.length; i += 4) {
-                r += data[i];
-                g += data[i + 1];
-                b += data[i + 2];
-                n++;
+                r += data[i]; g += data[i+1]; b += data[i+2]; n++;
             }
-            r = Math.round(r / n);
-            g = Math.round(g / n);
-            b = Math.round(b / n);
-            const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+            r = Math.round(r/n); g = Math.round(g/n); b = Math.round(b/n);
+            const lum = 0.299*r + 0.587*g + 0.114*b;
             let tone = 'soft natural light';
             if (lum < 90) tone = 'dark moody atmosphere';
             else if (lum > 170) tone = 'bright daylight';
             let hue = 'gray weathered stone';
-            if (r > g + 20 && r > b + 20) hue = 'reddish brick walls';
-            else if (g > r + 10 && g > b + 10) hue = 'greenish overgrown facade';
-            else if (b > r + 10 && b > g + 10) hue = 'bluish stone facade';
+            if (r > g+20 && r > b+20) hue = 'reddish brick walls';
+            else if (g > r+10 && g > b+10) hue = 'greenish overgrown facade';
+            else if (b > r+10 && b > g+10) hue = 'bluish stone facade';
             else if (r > 150 && g > 130 && b < 100) hue = 'warm yellow plaster walls';
-            res(tone + ', ' + hue + ', aged texture, weathered surface');
+            res(tone+', '+hue+', aged texture, weathered surface');
         };
-        img.onerror = () => res('old building, weathered facade, aged texture');
+        img.onerror = () => res('old building, weathered facade');
         img.src = originalBase64;
     });
 
     const restorePrompt = [
-        'beautiful restored building facade',
-        'pristine condition',
-        'newly repaired walls',
-        'intact complete windows with glass',
-        'clean restored facade',
-        'no damage no cracks no ruins',
-        'fully reconstructed',
-        'architectural photography',
-        analysis,
-        description,
-        styleDesc
+        'beautiful restored building facade', 'pristine condition',
+        'newly repaired walls', 'intact complete windows with glass',
+        'clean restored facade', 'no damage no cracks no ruins',
+        'fully reconstructed', 'architectural photography',
+        analysis, description, styleDesc
     ].filter(Boolean).join(', ');
 
     return await genWithFallback(restorePrompt);
