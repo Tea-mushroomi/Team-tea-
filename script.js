@@ -1,4 +1,4 @@
-// ===== 40 СТИЛЕЙ (ПОЛНЫЙ СПИСОК) =====
+// ===== 40 СТИЛЕЙ =====
 const STYLES = {
     "Без стиля": "",
     "Сталинка / неоклассика 1950-х": "Stalin-era neoclassical architecture, ornate cornice, arched windows, pastel colors",
@@ -98,87 +98,123 @@ const Audio_ = (() => {
     };
 })();
 
-// ===== ДВИЖКИ (С МОДЕЛЬЮ SANA) =====
-const Engine = {
-    _loadImage: (url, timeoutMs = 180000) => new Promise((resolve, reject) => {
+// ===== КОНВЕРТАЦИЯ BLOB → BASE64 (для сохранения в галерее) =====
+function blobToBase64(blobUrl) {
+    return new Promise((resolve, reject) => {
         const img = new Image();
         img.crossOrigin = 'anonymous';
-        const timer = setTimeout(() => {
-            img.onload = null;
-            img.onerror = null;
-            reject(new Error('Таймаут генерации (' + timeoutMs / 1000 + 'с). Попробуйте ещё раз.'));
-        }, timeoutMs);
         img.onload = () => {
-            clearTimeout(timer);
-            if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-                resolve(img);
-            } else {
-                reject(new Error('Получено пустое изображение'));
+            const canvas = document.createElement('canvas');
+            // Ограничиваем размер для localStorage (максимум ~2MB на картинку)
+            const maxDim = 800;
+            let w = img.naturalWidth, h = img.naturalHeight;
+            if (w > maxDim || h > maxDim) {
+                const ratio = Math.min(maxDim / w, maxDim / h);
+                w = Math.round(w * ratio);
+                h = Math.round(h * ratio);
             }
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, w, h);
+            // Освобождаем blob URL
+            URL.revokeObjectURL(blobUrl);
+            resolve(canvas.toDataURL('image/jpeg', 0.7));
         };
         img.onerror = () => {
-            clearTimeout(timer);
-            reject(new Error('Ошибка загрузки. Проверьте интернет или попробуйте другой движок.'));
+            URL.revokeObjectURL(blobUrl);
+            reject(new Error('Не удалось сконвертировать изображение'));
         };
-        img.src = url;
-    }),
+        img.src = blobUrl;
+    });
+}
+
+// ===== ДВИЖКИ =====
+const Engine = {
+    _fetchImage: async (url, timeoutMs = 240000) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timer);
+            if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            const blob = await response.blob();
+            if (blob.size < 1000) throw new Error('Получен пустой ответ от сервера');
+            return URL.createObjectURL(blob);
+        } catch (e) {
+            clearTimeout(timer);
+            if (e.name === 'AbortError') throw new Error(`Таймаут (${timeoutMs / 1000}с). Сервер не ответил.`);
+            throw e;
+        }
+    },
 
     pollinations: async (prompt, seed) => {
         const p = encodeURIComponent(prompt + ',' + BUILDING + ',highly detailed,8k,masterpiece');
         const n = encodeURIComponent(NEGATIVE);
-        // 4 модели: flux → sana → turbo → sdxl
-        const models = ['flux', 'sana', 'turbo', 'sdxl'];
+        const models = ['sana', 'flux', 'turbo', 'sdxl'];
+        const errors = [];
         for (const model of models) {
             try {
                 const url = `https://image.pollinations.ai/prompt/${p}?width=1024&height=1024&seed=${seed}&nologo=true&negative=${n}&model=${model}`;
-                await Engine._loadImage(url, 180000);
-                return { url, engine: `Pollinations (${model})` };
+                const blobUrl = await Engine._fetchImage(url, 240000);
+                // Конвертируем в base64 ДЛЯ СОХРАНЕНИЯ В ГАЛЕРЕЕ
+                const base64 = await blobToBase64(blobUrl);
+                return { url: base64, engine: `Pollinations (${model})`, rawUrl: url };
             } catch (e) {
-                console.warn(`Модель ${model} не ответила, пробуем следующую...`);
+                errors.push(`${model}: ${e.message}`);
+                console.warn(`[Pollinations] ${model} failed:`, e.message);
                 continue;
             }
         }
-        throw new Error('Все модели Pollinations недоступны. Проверьте интернет.');
+        throw new Error('Все модели недоступны:\n' + errors.join('\n'));
     },
 
     sana: async (prompt, seed) => {
         const p = encodeURIComponent(prompt + ',' + BUILDING + ',highly detailed,8k,masterpiece');
         const n = encodeURIComponent(NEGATIVE);
         const url = `https://image.pollinations.ai/prompt/${p}?width=1024&height=1024&seed=${seed}&nologo=true&negative=${n}&model=sana`;
-        await Engine._loadImage(url, 180000);
-        return { url, engine: 'Sana (Direct)' };
+        const blobUrl = await Engine._fetchImage(url, 240000);
+        const base64 = await blobToBase64(blobUrl);
+        return { url: base64, engine: 'Sana (Direct)', rawUrl: url };
     },
 
     horde: async (prompt, seed) => {
         const p = encodeURIComponent(prompt + ',' + BUILDING + ',stable diffusion,highly detailed,best quality');
         const url = `https://image.pollinations.ai/prompt/${p}?width=1024&height=1024&seed=${seed}&nologo=true&model=flux-realism`;
-        await Engine._loadImage(url, 180000);
-        return { url, engine: 'AI Horde (Flux Realism)' };
+        const blobUrl = await Engine._fetchImage(url, 240000);
+        const base64 = await blobToBase64(blobUrl);
+        return { url: base64, engine: 'AI Horde (Flux Realism)', rawUrl: url };
     },
 
-    canvas: async (base64) => {
+    canvas: async (base64Input) => {
         return new Promise((resolve, reject) => {
             const img = new Image();
             img.onload = () => {
                 try {
                     const c = document.createElement('canvas');
-                    c.width = img.width; c.height = img.height;
+                    const maxDim = 800;
+                    let w = img.naturalWidth, h = img.naturalHeight;
+                    if (w > maxDim || h > maxDim) {
+                        const ratio = Math.min(maxDim / w, maxDim / h);
+                        w = Math.round(w * ratio);
+                        h = Math.round(h * ratio);
+                    }
+                    c.width = w; c.height = h;
                     const x = c.getContext('2d');
                     x.filter = 'contrast(1.2) saturate(1.3) brightness(1.1)';
-                    x.drawImage(img, 0, 0);
-                    resolve({ url: c.toDataURL('image/png'), engine: 'Canvas Offline' });
-                } catch (e) {
-                    reject(new Error('Ошибка обработки Canvas'));
-                }
+                    x.drawImage(img, 0, 0, w, h);
+                    resolve({ url: c.toDataURL('image/jpeg', 0.7), engine: 'Canvas Offline' });
+                } catch (e) { reject(new Error('Ошибка обработки Canvas')); }
             };
             img.onerror = () => reject(new Error('Не удалось прочитать изображение'));
-            img.src = base64;
+            img.src = base64Input;
         });
     }
 };
 
 // ===== ПРИЛОЖЕНИЕ =====
 let curPage = 'generate';
+let lastGenParams = null;
 
 function setTheme(t) {
     S.theme = t; save();
@@ -253,9 +289,9 @@ function renderPage(page) {
             c.innerHTML += `<p style="text-align:center;padding:40px;color:var(--text-muted)">Галерея пуста. Создайте первый проект!</p>`;
         } else {
             const g = document.createElement('div'); g.className = 'gallery-grid';
-            S.history.forEach(i => {
+            S.history.forEach((i, idx) => {
                 const d = document.createElement('div'); d.className = 'gallery-item';
-                d.innerHTML = `<img src="${i.url}" loading="lazy" onclick="openLB('${i.url}')"><div class="gallery-item-meta"><span class="style">${i.style || 'Custom'}</span><span class="time">${new Date(i.date).toLocaleString()} · ${i.engine}</span></div>`;
+                d.innerHTML = `<img src="${i.url}" loading="lazy" onclick="openLB(${idx})"><div class="gallery-item-meta"><span class="style">${i.style || 'Custom'}</span><span class="time">${new Date(i.date).toLocaleString()} · ${i.engine}</span></div>`;
                 g.appendChild(d);
             });
             c.appendChild(g);
@@ -271,7 +307,7 @@ function renderPage(page) {
                 <div class="stat-card"><div class="stat-value" style="color:var(--grad-b)">${acc}%</div>Точность</div>
             </div>`;
     } else {
-        c.innerHTML = `<h2 class="page-title">ℹ️ О проекте</h2><p><b>Реставратор фасадов</b> — полностью клиентская JS-версия.<br>40 архитектурных стилей · 4 движка (Flux, Sana, Horde, Canvas) · Работает без API-ключей и сервера.</p>`;
+        c.innerHTML = `<h2 class="page-title">ℹ️ О проекте</h2><p><b>Реставратор фасадов</b> — полностью клиентская JS-версия.<br>40 архитектурных стилей · 4 движка (Sana, Flux, Horde, Canvas)<br>Галерея сохраняется локально в браузере.</p>`;
     }
 
     m.appendChild(c);
@@ -281,13 +317,30 @@ function renderPage(page) {
 function showResult(data) {
     const a = document.getElementById('res-area');
     a.innerHTML = `<div class="result">
-        <img src="${data.url}" onclick="openLB('${data.url}')">
+        <img src="${data.url}" onclick="openLB(0)">
         <div style="margin-bottom:15px;color:var(--text-muted);font-size:.9rem">Стиль: <b>${data.style}</b> | Движок: <b>${data.engine}</b></div>
         <div class="result-actions">
             <button class="btn-like" onclick="vote('l')">👍 Нравится</button>
             <button class="btn-dislike" onclick="vote('d')">👎 Не нравится</button>
-            <a href="${data.url}" download="facade_${Date.now()}.png" class="btn btn-secondary">💾 Скачать</a>
+            <a href="${data.url}" download="facade_${Date.now()}.jpg" class="btn btn-secondary">💾 Скачать</a>
         </div></div>`;
+    a.scrollIntoView({ behavior: 'smooth' });
+}
+
+function showError(msg) {
+    const a = document.getElementById('res-area');
+    a.innerHTML = `<div class="result" style="border-color:var(--error)">
+        <div style="font-size:3rem;margin-bottom:15px">⚠️</div>
+        <h3 style="color:var(--error);margin-bottom:10px">Ошибка генерации</h3>
+        <p style="color:var(--text-muted);margin-bottom:20px;white-space:pre-line;font-size:.9rem">${msg}</p>
+        <div class="result-actions">
+            <button class="btn gothic-btn" id="btn-retry">🔄 Попробовать снова</button>
+            <button class="btn btn-secondary" onclick="document.getElementById('res-area').innerHTML=''">✕ Закрыть</button>
+        </div>
+    </div>`;
+    document.getElementById('btn-retry').onclick = () => {
+        if (lastGenParams) doGenerate(lastGenParams.prompt, lastGenParams.style);
+    };
     a.scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -298,10 +351,13 @@ function vote(type) {
     Audio_.click();
 }
 
-function openLB(url) {
+// Лайтбокс теперь работает по индексу в истории (base64 всегда доступен)
+function openLB(index) {
+    const item = S.history[index];
+    if (!item) return;
     const m = document.getElementById('teapot-modal');
     const b = m.querySelector('.teapot-box');
-    b.innerHTML = `<button class="lightbox-close" onclick="closeLB()">×</button><img src="${url}" style="max-width:100%;max-height:70vh;border-radius:var(--radius);border:2px solid var(--accent)">`;
+    b.innerHTML = `<button class="lightbox-close" onclick="closeLB()">×</button><img src="${item.url}" style="max-width:100%;max-height:70vh;border-radius:var(--radius);border:2px solid var(--accent)"><div style="margin-top:10px;color:var(--text-muted);font-size:.85rem">${item.style || ''} · ${item.engine}</div>`;
     m.classList.add('active');
 }
 
@@ -318,54 +374,59 @@ function closeLB() {
     }, 300);
 }
 
+async function doGenerate(prompt, style) {
+    const seed = Math.floor(Math.random() * 999999);
+    const full = [prompt, STYLES[style]].filter(Boolean).join(', ');
+    lastGenParams = { prompt, style };
+
+    showLoad(`🎨 Генерация через ${S.engine}...\n(может занять до 4 минут)`);
+
+    try {
+        let r;
+        if (S.engine === 'horde') {
+            r = await Engine.horde(full, seed);
+        } else if (S.engine === 'sana') {
+            r = await Engine.sana(full, seed);
+        } else if (S.engine === 'canvas') {
+            alert('Движок Canvas только для реставрации.\nВыберите Sana, Pollinations или AI Horde.');
+            hideLoad();
+            return;
+        } else {
+            r = await Engine.pollinations(full, seed);
+        }
+
+        r.style = style;
+        r.date = new Date().toISOString();
+        S.history.unshift(r);
+        // Ограничиваем историю 50 записями чтобы не забить localStorage
+        if (S.history.length > 50) S.history = S.history.slice(0, 50);
+        S.learn.g++;
+        save();
+        updateUI();
+        showResult(r);
+        Audio_.ok();
+    } catch (e) {
+        console.error('Generation error:', e);
+        showError(e.message + '\n\nСоветы:\n• Переключите движок в настройках (⚙️)\n• Проверьте интернет-соединение\n• Нажмите «Попробовать снова»');
+        Audio_.err();
+    } finally {
+        hideLoad();
+    }
+}
+
 function bindPage() {
     const genBtn = document.getElementById('btn-gen');
-    if (genBtn) genBtn.onclick = async () => {
+    if (genBtn) genBtn.onclick = () => {
         const prompt = document.getElementById('gp').value.trim();
         const style = document.getElementById('gs').value;
-        const seed = document.getElementById('gseed').value || Math.floor(Math.random() * 999999);
-
         if (!prompt && style === 'Без стиля') return alert('Введите описание или выберите стиль');
-
-        const full = [prompt, STYLES[style]].filter(Boolean).join(', ');
-        showLoad(`🎨 Генерация через ${S.engine}...\n(может занять до 3 минут)`);
-
-        try {
-            let r;
-            if (S.engine === 'horde') {
-                r = await Engine.horde(full, seed);
-            } else if (S.engine === 'sana') {
-                r = await Engine.sana(full, seed);
-            } else if (S.engine === 'canvas') {
-                alert('Движок Canvas предназначен только для реставрации загруженных фото.\nПереключитесь на Pollinations, Sana или AI Horde для генерации.');
-                hideLoad();
-                return;
-            } else {
-                r = await Engine.pollinations(full, seed);
-            }
-
-            r.style = style;
-            r.date = new Date().toISOString();
-            S.history.unshift(r);
-            S.learn.g++;
-            save();
-            updateUI();
-            showResult(r);
-            Audio_.ok();
-        } catch (e) {
-            console.error('Generation error:', e);
-            alert('❌ Ошибка генерации:\n' + e.message + '\n\nПопробуйте:\n• Переключить движок в настройках\n• Проверить интернет\n• Повторить попытку');
-            Audio_.err();
-        } finally {
-            hideLoad();
-        }
+        doGenerate(prompt, style);
     };
 
     const resBtn = document.getElementById('btn-res');
     if (resBtn) resBtn.onclick = async () => {
         const f = document.getElementById('rf').files[0];
         if (!f) return alert('Выберите изображение для реставрации');
-
         showLoad('🔨 Реставрация фасада...');
         const reader = new FileReader();
         reader.onload = async (e) => {
@@ -374,17 +435,15 @@ function bindPage() {
                 r.style = 'Restored';
                 r.date = new Date().toISOString();
                 S.history.unshift(r);
+                if (S.history.length > 50) S.history = S.history.slice(0, 50);
                 S.learn.g++;
-                save();
-                updateUI();
+                save(); updateUI();
                 showResult(r);
                 Audio_.ok();
             } catch (err) {
-                alert('Ошибка реставрации: ' + err.message);
+                showError(err.message);
                 Audio_.err();
-            } finally {
-                hideLoad();
-            }
+            } finally { hideLoad(); }
         };
         reader.readAsDataURL(f);
     };
@@ -396,7 +455,6 @@ document.addEventListener('DOMContentLoaded', () => {
     updateUI();
     renderPage('generate');
 
-    // Звёзды
     const sb = document.getElementById('stars');
     for (let i = 0; i < 9; i++) {
         const s = document.createElement('div');
@@ -404,10 +462,34 @@ document.addEventListener('DOMContentLoaded', () => {
         s.style.animationDelay = (i * 0.8) + 's'; sb.appendChild(s);
     }
 
-    // Навигация
     document.querySelectorAll('.nav-btn').forEach(b =>
         b.addEventListener('click', e => { e.preventDefault(); navigate(b.dataset.page); }));
 
-    // Настройки
     const panel = document.getElementById('settings-panel');
-    document.getElementById('sett
+    document.getElementById('settings-btn').addEventListener('click', e => { e.stopPropagation(); panel.classList.toggle('open'); });
+    document.addEventListener('click', e => { if (!panel.contains(e.target) && e.target.id !== 'settings-btn') panel.classList.remove('open'); });
+    document.querySelectorAll('.theme-btn').forEach(b => b.addEventListener('click', () => { setTheme(b.dataset.theme); Audio_.click(); }));
+    document.getElementById('sound-on').checked = S.sound;
+    document.getElementById('sound-on').addEventListener('change', e => { S.sound = e.target.checked; save(); });
+    document.getElementById('engine-select').value = S.engine;
+    document.getElementById('engine-select').addEventListener('change', e => { S.engine = e.target.value; save(); Audio_.click(); });
+    document.getElementById('reset-coins').addEventListener('click', () => { S.coins = 0; S.tea = 0; save(); updateUI(); Audio_.click(); });
+
+    const ham = document.getElementById('hamster');
+    ham.addEventListener('click', e => {
+        e.stopPropagation();
+        ham.classList.remove('tap'); void ham.offsetWidth; ham.classList.add('tap');
+        S.coins++; save(); updateUI();
+        spawnCoin(e.clientX, e.clientY);
+        Audio_.click();
+    });
+
+    document.getElementById('teapot-link').addEventListener('click', e => {
+        e.preventDefault();
+        document.getElementById('teapot-modal').classList.add('active');
+        S.tea++; save(); updateUI();
+        Audio_.whistle();
+    });
+    document.getElementById('teapot-close').onclick = closeLB;
+    document.getElementById('teapot-sound-btn').onclick = Audio_.whistle;
+});
