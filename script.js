@@ -135,17 +135,76 @@ const Aud = (() => {
         whistle: () => {
             if (!S.sound) return;
             try {
-                const x = g(), o = x.createOscillator(), gn = x.createGain();
-                o.frequency.setValueAtTime(880, x.currentTime);
-                o.frequency.exponentialRampToValueAtTime(1760, x.currentTime + 0.4);
-                gn.gain.setValueAtTime(0.001, x.currentTime);
-                gn.gain.linearRampToValueAtTime(0.3, x.currentTime + 0.1);
-                gn.gain.exponentialRampToValueAtTime(0.001, x.currentTime + 1.2);
-                o.connect(gn);
-                gn.connect(x.destination);
-                o.start();
-                o.stop(x.currentTime + 1.3);
-            } catch (e) {}
+                async function restoreImage(originalBase64, description, style) {
+    const styleDesc = STYLES[style] || '';
+
+    // Анализируем оригинал: извлекаем цвета и тон для описания
+    const analysis = await new Promise((res) => {
+        const img = new Image();
+        img.onload = () => {
+            const c = document.createElement('canvas');
+            c.width = 32; c.height = 32;
+            const ctx = c.getContext('2d');
+            ctx.drawImage(img, 0, 0, 32, 32);
+            const data = ctx.getImageData(0, 0, 32, 32).data;
+            let r = 0, g = 0, b = 0, n = 0;
+            for (let i = 0; i < data.length; i += 4) {
+                r += data[i]; g += data[i+1]; b += data[i+2]; n++;
+            }
+            r = Math.round(r/n); g = Math.round(g/n); b = Math.round(b/n);
+            const lum = 0.299*r + 0.587*g + 0.114*b;
+            const tone = lum < 90 ? 'dark moody atmosphere' : (lum > 170 ? 'bright daylight' : 'soft natural light');
+            let hue = 'gray weathered stone';
+            if (r > g + 20 && r > b + 20) hue = 'reddish brick walls';
+            else if (g > r + 10 && g > b + 10) hue = 'greenish overgrown facade';
+            else if (b > r + 10 && b > g + 10) hue = 'bluish stone facade';
+            else if (r > 150 && g > 130 && b < 100) hue = 'warm yellow plaster walls';
+            res(tone + ', ' + hue + ', aged texture, weathered surface');
+        };
+        img.onerror = () => res('old building, weathered facade, aged texture');
+        img.src = originalBase64;
+    });
+
+    // Формируем мощный промпт для реставрации
+    const restorePrompt = [
+        'beautiful restored building facade',
+        'pristine condition',
+        'newly repaired walls',
+        'intact complete windows with glass',
+        'clean restored facade',
+        'no damage no cracks no ruins',
+        'fully reconstructed',
+        'architectural photography',
+        analysis,
+        description,
+        styleDesc,
+        BLD
+    ].filter(Boolean).join(', ');
+
+    const p = encodeURIComponent(restorePrompt);
+    const n = encodeURIComponent(NEG + ',ruins,damage,cracks,broken,destroyed,abandoned,graffiti,dirt,stains');
+    const seed = Math.floor(Math.random() * 999999);
+
+    // Используем обычный text-to-image (без &image= который не работает)
+    // Но с очень детальным промптом основанным на анализе оригинала
+    const models = ['flux', 'sana', 'turbo', 'sdxl'];
+    const errs = [];
+
+    for (const model of models) {
+        try {
+            const url = 'https://image.pollinations.ai/prompt/' + p +
+                '?width=1024&height=1024&seed=' + seed +
+                '&nologo=true&negative=' + n +
+                '&model=' + model;
+            const b64 = await toBase64(url);
+            return { url: b64, engine: 'Restoration (' + model + ')' };
+        } catch (e) {
+            errs.push(model + ': ' + (e.message || 'unknown error'));
+            console.warn('Restore ' + model + ' failed:', e.message);
+        }
+    }
+    throw new Error('Реставрация не удалась:\n' + errs.join('\n'));
+                }
         }
     };
 })();
