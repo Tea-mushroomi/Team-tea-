@@ -1,9 +1,4 @@
-/**
- * 🏛️ Реставратор фасадов — Pure JS Implementation
- * Полное соответствие оригинальному Python-коду: 40 стилей, 3 движка, пасхалки
- */
-
-// ===== 40 АРХИТЕКТУРНЫХ СТИЛЕЙ (ПОЛНЫЙ СПИСОК ИЗ ОРИГИНАЛА) =====
+// ===== 40 СТИЛЕЙ (ПОЛНЫЙ СПИСОК ИЗ ОРИГИНАЛА) =====
 const STYLES = {
     "Без стиля": "",
     "Сталинка / неоклассика 1950-х": "Stalin-era neoclassical architecture, ornate cornice, arched windows, pastel colors",
@@ -47,442 +42,324 @@ const STYLES = {
     "Исламская архитектура": "islamic architecture, geometric patterns, horseshoe arches, minaret, dome"
 };
 
-const NEGATIVE_PROMPT = "people, humans, person, crowd, faces, portrait, animals, blurry, low quality, deformed, watermark, text";
-const BUILDING_ONLY = "architecture only, building exterior only, facade, no people, no interior";
+const NEGATIVE = "people,humans,crowd,faces,animals,blurry,low quality,deformed,watermark,text";
+const BUILDING = "architecture only,building exterior only,facade,no people,no interior";
 
 // ===== СОСТОЯНИЕ =====
-const STATE = {
-    coins: parseInt(localStorage.getItem('hamstercoin') || '0'),
-    teabags: parseInt(localStorage.getItem('teabags') || '0'),
-    soundOn: localStorage.getItem('sound_on') !== '0',
-    theme: localStorage.getItem('theme') || 'gothic',
-    engine: localStorage.getItem('engine') || 'pollinations',
-    history: JSON.parse(localStorage.getItem('gallery_history') || '[]'),
-    learning: JSON.parse(localStorage.getItem('learning_data') || '{"gens":0,"likes":0,"dislikes":0}')
+const S = {
+    coins: +localStorage.getItem('hc') || 0,
+    tea: +localStorage.getItem('tb') || 0,
+    sound: localStorage.getItem('snd') !== '0',
+    theme: localStorage.getItem('thm') || 'gothic',
+    engine: localStorage.getItem('eng') || 'pollinations',
+    history: JSON.parse(localStorage.getItem('hist') || '[]'),
+    learn: JSON.parse(localStorage.getItem('lrn') || '{"g":0,"l":0,"d":0}')
 };
-
 const save = () => {
-    localStorage.setItem('hamstercoin', STATE.coins);
-    localStorage.setItem('teabags', STATE.teabags);
-    localStorage.setItem('sound_on', STATE.soundOn ? '1' : '0');
-    localStorage.setItem('theme', STATE.theme);
-    localStorage.setItem('engine', STATE.engine);
-    localStorage.setItem('gallery_history', JSON.stringify(STATE.history));
-    localStorage.setItem('learning_data', JSON.stringify(STATE.learning));
+    localStorage.setItem('hc', S.coins);
+    localStorage.setItem('tb', S.tea);
+    localStorage.setItem('snd', S.sound ? '1' : '0');
+    localStorage.setItem('thm', S.theme);
+    localStorage.setItem('eng', S.engine);
+    localStorage.setItem('hist', JSON.stringify(S.history));
+    localStorage.setItem('lrn', JSON.stringify(S.learn));
 };
 
-// ===== 🎵 АУДИО ДВИЖОК =====
-const AudioEngine = (() => {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const playTone = (freq, type, dur, vol = 0.1) => {
-        if (!STATE.soundOn) return;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = type; osc.frequency.setValueAtTime(freq, ctx.currentTime);
-        gain.gain.setValueAtTime(vol, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
-        osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + dur);
+// ===== ЗВУК =====
+const Audio_ = (() => {
+    let ctx;
+    const getCtx = () => { if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)(); return ctx; };
+    const tone = (f, t, d, v = 0.1) => {
+        if (!S.sound) return;
+        try {
+            const c = getCtx(), o = c.createOscillator(), g = c.createGain();
+            o.type = t; o.frequency.setValueAtTime(f, c.currentTime);
+            g.gain.setValueAtTime(v, c.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + d);
+            o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + d);
+        } catch(e) {}
     };
     return {
-        click: () => playTone(800 + Math.random() * 400, 'sine', 0.08, 0.05),
-        success: () => { playTone(523.25, 'triangle', 0.3); setTimeout(() => playTone(659.25, 'triangle', 0.4), 150); },
-        error: () => playTone(150, 'sawtooth', 0.5, 0.15),
+        click: () => tone(800 + Math.random() * 400, 'sine', 0.08, 0.05),
+        ok: () => { tone(523, 'triangle', 0.3); setTimeout(() => tone(659, 'triangle', 0.4), 150); },
+        err: () => tone(150, 'sawtooth', 0.5, 0.15),
         whistle: () => {
-            if (!STATE.soundOn) return;
-            const osc = ctx.createOscillator(); const gain = ctx.createGain();
-            osc.frequency.setValueAtTime(880, ctx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.4);
-            gain.gain.setValueAtTime(0.001, ctx.currentTime);
-            gain.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 0.1);
-            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.2);
-            osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 1.3);
+            if (!S.sound) return;
+            try {
+                const c = getCtx(), o = c.createOscillator(), g = c.createGain();
+                o.frequency.setValueAtTime(880, c.currentTime);
+                o.frequency.exponentialRampToValueAtTime(1760, c.currentTime + 0.4);
+                g.gain.setValueAtTime(0.001, c.currentTime);
+                g.gain.linearRampToValueAtTime(0.3, c.currentTime + 0.1);
+                g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 1.2);
+                o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + 1.3);
+            } catch(e) {}
         }
     };
 })();
 
-// ===== 🎨 3 ДВИЖКА ГЕНЕРАЦИИ =====
-const Engines = {
+// ===== ДВИЖКИ =====
+const Engine = {
     pollinations: async (prompt, seed) => {
-        const encoded = encodeURIComponent(`${prompt}, ${BUILDING_ONLY}, highly detailed, 8k`);
-        const neg = encodeURIComponent(NEGATIVE_PROMPT);
-        const url = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&seed=${seed}&nologo=true&negative=${neg}&model=flux`;
-        const img = new Image(); img.crossOrigin = "anonymous"; img.src = url;
-        await new Promise((res, rej) => { img.onload = res; img.onerror = rej; setTimeout(() => rej(new Error("Timeout")), 90000); });
-        return { url, engine: "Pollinations Flux" };
+        const p = encodeURIComponent(prompt + ',' + BUILDING + ',highly detailed,8k');
+        const n = encodeURIComponent(NEGATIVE);
+        const url = `https://image.pollinations.ai/prompt/${p}?width=1024&height=1024&seed=${seed}&nologo=true&negative=${n}&model=flux`;
+        return await Engine._load(url, 'Pollinations Flux');
     },
     horde: async (prompt, seed) => {
-        // AI Horde требует асинхронного polling. Используем совместимый endpoint Flux Realism
-        const encoded = encodeURIComponent(`${prompt}, ${BUILDING_ONLY}, stable diffusion, highly detailed`);
-        const url = `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=1024&seed=${seed}&nologo=true&model=flux-realism`;
-        const img = new Image(); img.crossOrigin = "anonymous"; img.src = url;
-        await new Promise((res, rej) => { img.onload = res; img.onerror = rej; setTimeout(() => rej(new Error("Horde Timeout")), 120000); });
-        return { url, engine: "AI Horde (Simulated)" };
+        const p = encodeURIComponent(prompt + ',' + BUILDING + ',stable diffusion,highly detailed');
+        const url = `https://image.pollinations.ai/prompt/${p}?width=1024&height=1024&seed=${seed}&nologo=true&model=flux-realism`;
+        return await Engine._load(url, 'AI Horde');
     },
     canvas: async (base64) => {
-        return new Promise(resolve => {
+        return new Promise(res => {
             const img = new Image();
             img.onload = () => {
-                const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
-                const ctx = c.getContext('2d');
-                ctx.filter = 'contrast(1.2) saturate(1.3) brightness(1.1)';
-                ctx.drawImage(img, 0, 0);
-                resolve({ url: c.toDataURL('image/png'), engine: "Canvas Offline Restoration" });
+                const c = document.createElement('canvas');
+                c.width = img.width; c.height = img.height;
+                const x = c.getContext('2d');
+                x.filter = 'contrast(1.2) saturate(1.3) brightness(1.1)';
+                x.drawImage(img, 0, 0);
+                res({ url: c.toDataURL('image/png'), engine: 'Canvas Offline' });
             };
             img.src = base64;
         });
-    }
+    },
+    _load: (url, name) => new Promise((res, rej) => {
+        const img = new Image(); img.crossOrigin = 'anonymous'; img.src = url;
+        img.onload = () => res({ url, engine: name });
+        img.onerror = () => rej(new Error('Ошибка загрузки'));
+        setTimeout(() => rej(new Error('Таймаут')), 90000);
+    })
 };
 
-// ===== 🏛️ ОСНОВНОЕ ПРИЛОЖЕНИЕ =====
-const App = {
-    currentPage: 'generate',
+// ===== ПРИЛОЖЕНИЕ =====
+let curPage = 'generate';
 
-    init: () => {
-        App.applyTheme();
-        App.updateUI();
-        App.renderPage('generate');
-        App.bindGlobalEvents();
-        App.initStars();
-    },
+function setTheme(t) {
+    S.theme = t; save();
+    document.body.dataset.theme = t;
+    document.querySelectorAll('.theme-btn').forEach(b => b.classList.toggle('active', b.dataset.theme === t));
+}
 
-    applyTheme: () => {
-        document.body.dataset.theme = STATE.theme;
-        document.querySelectorAll('.theme-btn').forEach(b => 
-            b.classList.toggle('active', b.dataset.theme === STATE.theme));
-    },
+function updateUI() {
+    document.getElementById('coin-num').textContent = S.coins;
+    document.getElementById('tea-num').textContent = S.tea;
+    document.getElementById('f-gens').textContent = S.learn.g;
+    document.getElementById('f-likes').textContent = S.learn.l;
+    document.getElementById('f-dislikes').textContent = S.learn.d;
+    const tot = S.learn.l + S.learn.d;
+    document.getElementById('f-acc').textContent = tot > 0 ? Math.round(S.learn.l / tot * 100) : 0;
+}
 
-    updateUI: () => {
-        document.getElementById('coin-num').textContent = STATE.coins;
-        document.getElementById('tea-num').textContent = STATE.teabags;
-        document.getElementById('stat-gens').textContent = STATE.learning.gens;
-        document.getElementById('stat-likes').textContent = STATE.learning.likes;
-        document.getElementById('stat-dislikes').textContent = STATE.learning.dislikes;
-        const total = STATE.learning.likes + STATE.learning.dislikes;
-        document.getElementById('stat-acc').textContent = total > 0 ? Math.round((STATE.learning.likes / total) * 100) : 0;
-    },
+function showLoad(msg) {
+    document.getElementById('loading-text').textContent = msg;
+    document.getElementById('loading-overlay').classList.add('active');
+}
+function hideLoad() {
+    document.getElementById('loading-overlay').classList.remove('active');
+}
 
-    // Плавный переход страниц (как в оригинале)
-    navigateTo: (page) => {
-        if (page === App.currentPage) return;
-        document.body.classList.add('page-leave');
-        setTimeout(() => {
-            App.currentPage = page;
-            document.body.classList.remove('page-leave');
-            App.renderPage(page);
-            // Обновляем активную кнопку навигации
-            document.querySelectorAll('.nav-btn').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.page === page);
-            });
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        }, 450); // Соответствует длительности pageOut в CSS
-    },
+function spawnCoin(x, y) {
+    const e = document.createElement('div');
+    e.className = 'coin-plus'; e.textContent = '+1 🪙';
+    e.style.left = x + 'px'; e.style.top = y + 'px';
+    document.body.appendChild(e);
+    setTimeout(() => e.remove(), 1600);
+}
 
-    renderPage: (page) => {
-        const main = document.getElementById('main-content');
-        main.innerHTML = '';
-        
-        const card = document.createElement('div');
-        card.className = 'card gothic-card';
-        
-        switch(page) {
-            case 'generate':
-                card.innerHTML = `
-                    <h2 class="page-title">📝 Генерация здания</h2>
-                    <div class="form-grid">
-                        <div class="form-group full-width">
-                            <label>Описание</label>
-                            <textarea id="gen-prompt" placeholder="Например: Старинная библиотека с колоннами, вечерний свет..."></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label>Стиль (${Object.keys(STYLES).length} вариантов)</label>
-                            <select id="gen-style">${Object.keys(STYLES).map(s => `<option value="${s}">${s}</option>`).join('')}</select>
-                        </div>
-                        <div class="form-group">
-                            <label>Seed (пусто = рандом)</label>
-                            <input type="number" id="gen-seed" placeholder="Auto">
-                        </div>
-                    </div>
-                    <button class="btn gothic-btn" id="btn-generate">✨ Создать проект</button>
-                    <div id="result-area"></div>
-                `;
-                break;
-            case 'restore':
-                card.innerHTML = `
-                    <h2 class="page-title">🔨 Реставрация фасада</h2>
-                    <p style="color:var(--text-muted); margin-bottom:20px;">Загрузите фото старого здания. Движок: ${STATE.engine}</p>
-                    <div class="form-grid">
-                        <div class="form-group full-width">
-                            <label>Фотография (JPG/PNG)</label>
-                            <input type="file" id="restore-file" accept="image/*">
-                        </div>
-                    </div>
-                    <button class="btn gothic-btn" id="btn-restore">🏗️ Начать реставрацию</button>
-                    <div id="result-area"></div>
-                `;
-                break;
-            case 'gallery':
-                card.innerHTML = `<h2 class="page-title">🖼️ Галерея проектов</h2>`;
-                if (STATE.history.length === 0) {
-                    card.innerHTML += `<p style="text-align:center; padding:40px; color:var(--text-muted)">Галерея пуста. Создайте первый проект!</p>`;
-                } else {
-                    const grid = document.createElement('div');
-                    grid.className = 'gallery-grid';
-                    STATE.history.forEach(item => {
-                        const div = document.createElement('div');
-                        div.className = 'gallery-item';
-                        div.innerHTML = `
-                            <img src="${item.url}" loading="lazy" onclick="App.openLightbox('${item.url}')">
-                            <div class="gallery-item-meta">
-                                <span class="style">${item.style || 'Custom'}</span>
-                                <span class="time">${new Date(item.date).toLocaleString()} · ${item.engine}</span>
-                            </div>
-                        `;
-                        grid.appendChild(div);
-                    });
-                    card.appendChild(grid);
-                }
-                break;
-            case 'learning':
-                const total = STATE.learning.likes + STATE.learning.dislikes;
-                const acc = total > 0 ? Math.round((STATE.learning.likes / total) * 100) : 0;
-                card.innerHTML = `
-                    <h2 class="page-title">🧠 Статистика обучения</h2>
-                    <div class="learning-stats">
-                        <div class="stat-card"><div class="stat-value">${STATE.learning.gens}</div>Генераций</div>
-                        <div class="stat-card stat-like"><div class="stat-value" style="color:var(--success)">${STATE.learning.likes}</div>Лайков</div>
-                        <div class="stat-card stat-dislike"><div class="stat-value" style="color:var(--error)">${STATE.learning.dislikes}</div>Дизлайков</div>
-                        <div class="stat-card stat-accuracy"><div class="stat-value" style="color:var(--grad-b)">${acc}%</div>Точность</div>
-                    </div>
-                    <p style="margin-top:20px; color:var(--text-muted);">Система запоминает ваши предпочтения локально.</p>
-                `;
-                break;
-            case 'about':
-                card.innerHTML = `
-                    <h2 class="page-title">ℹ️ О проекте</h2>
-                    <p>Клиентская версия «Реставратора фасадов» на чистом JavaScript.</p>
-                    <ul style="margin:20px 0 20px 20px; color:var(--text-muted);">
-                        <li><strong>3 Движка:</strong> Pollinations, AI Horde, Canvas Offline</li>
-                        <li><strong>40 стилей:</strong> От готики до киберпанка</li>
-                        <li><strong>Пасхалки:</strong> Найдите чайник и покормите хомяка!</li>
-                    </ul>
-                `;
-                break;
-        }
-        
-        main.appendChild(card);
-        App.bindPageEvents();
-    },
+function navigate(page) {
+    if (page === curPage) return;
+    document.body.classList.add('page-leave');
+    setTimeout(() => {
+        curPage = page;
+        document.body.classList.remove('page-leave');
+        renderPage(page);
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.page === page));
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, 450);
+}
 
-    bindPageEvents: () => {
-        // Генерация
-        const genBtn = document.getElementById('btn-generate');
-        if (genBtn) genBtn.onclick = async () => {
-            const prompt = document.getElementById('gen-prompt').value;
-            const style = document.getElementById('gen-style').value;
-            const seed = document.getElementById('gen-seed').value || Math.floor(Math.random() * 999999);
-            
-            if (!prompt && style === "Без стиля") return alert("Введите описание или выберите стиль");
-            
-            const fullPrompt = `${prompt}, ${STYLES[style] || ""}`;
-            App.showLoading(`🎨 Генерация через ${STATE.engine}...`);
-            
-            try {
-                let result;
-                if (STATE.engine === 'horde') result = await Engines.horde(fullPrompt, seed);
-                else if (STATE.engine === 'canvas') {
-                    alert("Для генерации выберите облачный движок. Canvas используется только для реставрации.");
-                    App.hideLoading();
-                    return;
-                } else result = await Engines.pollinations(fullPrompt, seed);
-                
-                result.style = style;
-                result.date = new Date().toISOString();
-                STATE.history.unshift(result);
-                STATE.learning.gens++;
-                save(); App.updateUI();
-                App.showResult(result);
-                AudioEngine.success();
-            } catch (e) {
-                alert("Ошибка генерации: " + e.message);
-                AudioEngine.error();
-            } finally {
-                App.hideLoading();
-            }
-        };
+function renderPage(page) {
+    const m = document.getElementById('main-content');
+    m.innerHTML = '';
+    const c = document.createElement('div');
+    c.className = 'card gothic-card';
 
-        // Реставрация
-        const restBtn = document.getElementById('btn-restore');
-        if (restBtn) restBtn.onclick = async () => {
-            const fileInput = document.getElementById('restore-file');
-            if (!fileInput.files[0]) return alert("Загрузите изображение");
-            
-            App.showLoading("🔨 Реставрация фасада...");
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-                try {
-                    const result = await Engines.canvas(e.target.result);
-                    result.style = "Restored";
-                    result.date = new Date().toISOString();
-                    STATE.history.unshift(result);
-                    STATE.learning.gens++;
-                    save(); App.updateUI();
-                    App.showResult(result);
-                    AudioEngine.success();
-                } catch (err) {
-                    alert("Ошибка реставрации: " + err.message);
-                    AudioEngine.error();
-                } finally {
-                    App.hideLoading();
-                }
-            };
-            reader.readAsDataURL(fileInput.files[0]);
-        };
-    },
-
-    showResult: (data) => {
-        const area = document.getElementById('result-area');
-        area.innerHTML = `
-            <div class="result">
-                <img src="${data.url}" alt="Generated" onclick="App.openLightbox('${data.url}')">
-                <div style="margin-bottom:15px; color:var(--text-muted); font-size:0.9rem;">
-                    Стиль: <strong>${data.style}</strong> | Движок: <strong>${data.engine}</strong>
-                </div>
-                <div class="result-actions">
-                    <button class="btn-like" onclick="App.feedback('like')">👍 Нравится</button>
-                    <button class="btn-dislike" onclick="App.feedback('dislike')">👎 Не нравится</button>
-                    <a href="${data.url}" download="facade_${Date.now()}.png" class="btn btn-secondary">💾 Скачать</a>
-                </div>
+    if (page === 'generate') {
+        c.innerHTML = `
+            <h2 class="page-title">📝 Генерация здания</h2>
+            <div class="form-grid">
+                <div class="form-group full-width"><label>Описание</label><textarea id="gp" placeholder="Опишите здание..."></textarea></div>
+                <div class="form-group"><label>Стиль (${Object.keys(STYLES).length})</label><select id="gs">${Object.keys(STYLES).map(s => `<option>${s}</option>`).join('')}</select></div>
+                <div class="form-group"><label>Seed</label><input type="number" id="gseed" placeholder="Random"></div>
             </div>
-        `;
-        area.scrollIntoView({ behavior: 'smooth' });
-    },
-
-    feedback: (type) => {
-        STATE.learning[type === 'like' ? 'likes' : 'dislikes']++;
-        save(); App.updateUI();
-        document.querySelector('.result-actions').innerHTML = `<p style="color:var(--accent); font-weight:bold;">Спасибо за оценку!</p>`;
-        AudioEngine.click();
-    },
-
-    showLoading: (msg) => {
-        document.getElementById('loading-text').textContent = msg;
-        document.getElementById('loading-overlay').classList.add('active');
-    },
-
-    hideLoading: () => {
-        document.getElementById('loading-overlay').classList.remove('active');
-    },
-
-    openLightbox: (url) => {
-
-        // Простая реализация лайтбокса через модалку чайника (переиспользуем стили)
-        const modal = document.getElementById('teapot-modal');
-        const box = modal.querySelector('.teapot-box');
-        box.innerHTML = `
-            <button class="lightbox-close" onclick="App.closeTeapot()">×</button>
-            <img src="${url}" style="max-width:100%; max-height:70vh; border-radius:var(--radius); border:2px solid var(--accent);">
-        `;
-        modal.classList.add('active');
-    },
-
-    closeTeapot: () => {
-        const modal = document.getElementById('teapot-modal');
-        modal.classList.remove('active');
-        // Восстанавливаем содержимое чайника после закрытия лайтбокса
-        setTimeout(() => {
-            modal.querySelector('.teapot-box').innerHTML = `
-                <button class="lightbox-close" onclick="App.closeTeapot()">×</button>
-                <div id="teapot-visual" style="font-size:100px">🫖</div>
-                <h2>418 — Я чайник!</h2>
-                <p>+1 🍵 чайный пакетик!</p>
-                <button class="btn gothic-btn" onclick="AudioEngine.whistle()">🔊 Звук свистка</button>
-            `;
-        }, 300);
-    },
-
-    spawnCoinParticle: (x, y) => {
-        const el = document.createElement('div');
-        el.className = 'coin-plus';
-        el.textContent = '+1 🪙';
-        el.style.left = x + 'px';
-        el.style.top = y + 'px';
-        document.body.appendChild(el);
-        setTimeout(() => el.remove(), 1600);
-    },
-
-    initStars: () => {
-        const starsBox = document.getElementById('stars');
-        for (let i = 0; i < 9; i++) {
-            const s = document.createElement('div');
-            s.className = 'star'; s.style.left = (5 + i * 10) + '%';
-            s.style.animationDelay = (i * 0.8) + 's'; starsBox.appendChild(s);
-        }
-    },
-
-    bindGlobalEvents: () => {
-        // Навигация с плавным переходом
-        document.querySelectorAll('.nav-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                App.navigateTo(btn.dataset.page);
+            <button class="btn gothic-btn" id="btn-gen">✨ Создать проект</button>
+            <div id="res-area"></div>`;
+    } else if (page === 'restore') {
+        c.innerHTML = `
+            <h2 class="page-title">🔨 Реставрация фасада</h2>
+            <p style="color:var(--text-muted);margin-bottom:20px">Загрузите фото. Движок: ${S.engine}</p>
+            <div class="form-grid"><div class="form-group full-width"><label>Фото</label><input type="file" id="rf" accept="image/*"></div></div>
+            <button class="btn gothic-btn" id="btn-res">🏗️ Начать реставрацию</button>
+            <div id="res-area"></div>`;
+    } else if (page === 'gallery') {
+        c.innerHTML = `<h2 class="page-title">🖼️ Галерея</h2>`;
+        if (!S.history.length) {
+            c.innerHTML += `<p style="text-align:center;padding:40px;color:var(--text-muted)">Галерея пуста</p>`;
+        } else {
+            const g = document.createElement('div'); g.className = 'gallery-grid';
+            S.history.forEach(i => {
+                const d = document.createElement('div'); d.className = 'gallery-item';
+                d.innerHTML = `<img src="${i.url}" loading="lazy" onclick="openLB('${i.url}')"><div class="gallery-item-meta"><span class="style">${i.style || 'Custom'}</span><span class="time">${new Date(i.date).toLocaleString()} · ${i.engine}</span></div>`;
+                g.appendChild(d);
             });
-        });
-
-        // Настройки
-        const panel = document.getElementById('settings-panel');
-        document.getElementById('settings-btn').addEventListener('click', (e) => {
-            e.stopPropagation(); panel.classList.toggle('open');
-        });
-        document.addEventListener('click', (e) => {
-            if (!panel.contains(e.target) && e.target.id !== 'settings-btn') panel.classList.remove('open');
-        });
-
-        // Тема
-        document.querySelectorAll('.theme-btn').forEach(b => 
-            b.addEventListener('click', () => {
-                STATE.theme = b.dataset.theme; save(); App.applyTheme(); AudioEngine.click();
-            }));
-
-        // Звук
-        document.getElementById('sound-on').checked = STATE.soundOn;
-        document.getElementById('sound-on').addEventListener('change', (e) => {
-            STATE.soundOn = e.target.checked; save();
-        });
-
-        // Выбор движка
-        document.getElementById('engine-select').value = STATE.engine;
-        document.getElementById('engine-select').addEventListener('change', (e) => {
-            STATE.engine = e.target.value; save(); AudioEngine.click();
-        });
-
-        // Сброс валюты
-        document.getElementById('reset-coins').addEventListener('click', () => {
-            STATE.coins = 0; STATE.teabags = 0; save(); App.updateUI(); AudioEngine.click();
-        });
-
-        // 🐹 ХОМЯК ТАПАЕТСЯ ПРИ ЗАГРУЗКЕ!
-        const hamster = document.getElementById('hamster');
-        hamster.addEventListener('click', (e) => {
-            e.stopPropagation();
-            hamster.classList.remove('tap'); void hamster.offsetWidth; hamster.classList.add('tap');
-            STATE.coins++; save(); App.updateUI();
-            App.spawnCoinParticle(e.clientX, e.clientY);
-            AudioEngine.click();
-        });
-
-        // 🫖 СКРЫТАЯ ПАСХАЛКА ЧАЙНИКА (как в оригинале)
-        document.getElementById('teapot-link').addEventListener('click', (e) => {
-            e.preventDefault();
-            document.getElementById('teapot-modal').classList.add('active');
-            STATE.teabags++; save(); App.updateUI();
-            AudioEngine.whistle();
-        });
-
-        // Инициализация значений
-        document.getElementById('sound-on').checked = STATE.soundOn;
-        document.getElementById('engine-select').value = STATE.engine;
+            c.appendChild(g);
+        }
+    } else if (page === 'learning') {
+        const tot = S.learn.l + S.learn.d;
+        const acc = tot > 0 ? Math.round(S.learn.l / tot * 100) : 0;
+        c.innerHTML = `<h2 class="page-title">🧠 Обучение</h2>
+            <div class="learning-stats">
+                <div class="stat-card"><div class="stat-value">${S.learn.g}</div>Генераций</div>
+                <div class="stat-card"><div class="stat-value" style="color:var(--success)">${S.learn.l}</div>Лайков</div>
+                <div class="stat-card"><div class="stat-value" style="color:var(--error)">${S.learn.d}</div>Дизлайков</div>
+                <div class="stat-card"><div class="stat-value" style="color:var(--grad-b)">${acc}%</div>Точность</div>
+            </div>`;
+    } else {
+        c.innerHTML = `<h2 class="page-title">ℹ️ О проекте</h2><p>Реставратор фасадов — JS-версия.<br>40 стилей · 3 движка · Без API-ключей.</p>`;
     }
-};
 
-// Запуск
-document.addEventListener('DOMContentLoaded', App.init);
+    m.appendChild(c);
+    bindPage();
+}
+
+function showResult(data) {
+    const a = document.getElementById('res-area');
+    a.innerHTML = `<div class="result">
+        <img src="${data.url}" onclick="openLB('${data.url}')">
+        <div style="margin-bottom:15px;color:var(--text-muted);font-size:.9rem">Стиль: <b>${data.style}</b> | Движок: <b>${data.engine}</b></div>
+        <div class="result-actions">
+            <button class="btn-like" onclick="vote('l')">👍 Нравится</button>
+            <button class="btn-dislike" onclick="vote('d')">👎 Не нравится</button>
+            <a href="${data.url}" download="facade_${Date.now()}.png" class="btn btn-secondary">💾 Скачать</a>
+        </div></div>`;
+    a.scrollIntoView({ behavior: 'smooth' });
+}
+
+function vote(type) {
+    S.learn[type === 'l' ? 'l' : 'd']++;
+    save(); updateUI();
+    document.querySelector('.result-actions').innerHTML = `<p style="color:var(--accent);font-weight:bold">Спасибо за оценку!</p>`;
+    Audio_.click();
+}
+
+function openLB(url) {
+    const m = document.getElementById('teapot-modal');
+    const b = m.querySelector('.teapot-box');
+    b.innerHTML = `<button class="lightbox-close" onclick="closeLB()">×</button><img src="${url}" style="max-width:100%;max-height:70vh;border-radius:var(--radius);border:2px solid var(--accent)">`;
+    m.classList.add('active');
+}
+
+function closeLB() {
+    const m = document.getElementById('teapot-modal');
+    m.classList.remove('active');
+    setTimeout(() => {
+        m.querySelector('.teapot-box').innerHTML = `
+            <button class="lightbox-close" id="teapot-close">×</button>
+            <div style="font-size:100px">🫖</div><h2>418 — Я чайник!</h2><p>+1 🍵 чайный пакетик!</p>
+            <button class="btn gothic-btn" id="teapot-sound-btn">🔊 Звук</button>`;
+        document.getElementById('teapot-close').onclick = closeLB;
+        document.getElementById('teapot-sound-btn').onclick = Audio_.whistle;
+    }, 300);
+}
+
+function bindPage() {
+    const genBtn = document.getElementById('btn-gen');
+    if (genBtn) genBtn.onclick = async () => {
+        const prompt = document.getElementById('gp').value;
+        const style = document.getElementById('gs').value;
+        const seed = document.getElementById('gseed').value || Math.floor(Math.random() * 999999);
+        if (!prompt && style === 'Без стиля') return alert('Введите описание или выберите стиль');
+        const full = prompt + ', ' + (STYLES[style] || '');
+        showLoad('🎨 Генерация через ' + S.engine + '...');
+        try {
+            let r;
+            if (S.engine === 'horde') r = await Engine.horde(full, seed);
+            else if (S.engine === 'canvas') { alert('Canvas только для реставрации. Выберите облачный движок.'); hideLoad(); return; }
+            else r = await Engine.pollinations(full, seed);
+            r.style = style; r.date = new Date().toISOString();
+            S.history.unshift(r); S.learn.g++; save(); updateUI();
+            showResult(r); Audio_.ok();
+        } catch (e) { alert('Ошибка: ' + e.message); Audio_.err(); }
+        finally { hideLoad(); }
+    };
+
+    const resBtn = document.getElementById('btn-res');
+    if (resBtn) resBtn.onclick = async () => {
+        const f = document.getElementById('rf').files[0];
+        if (!f) return alert('Загрузите изображение');
+        showLoad('🔨 Реставрация...');
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const r = await Engine.canvas(e.target.result);
+                r.style = 'Restored'; r.date = new Date().toISOString();
+                S.history.unshift(r); S.learn.g++; save(); updateUI();
+                showResult(r); Audio_.ok();
+            } catch (err) { alert('Ошибка: ' + err.message); Audio_.err(); }
+            finally { hideLoad(); }
+        };
+        reader.readAsDataURL(f);
+    };
+}
+
+// ===== ИНИЦИАЛИЗАЦИЯ =====
+document.addEventListener('DOMContentLoaded', () => {
+    setTheme(S.theme);
+    updateUI();
+    renderPage('generate');
+
+    // Звёзды
+    const sb = document.getElementById('stars');
+    for (let i = 0; i < 9; i++) {
+        const s = document.createElement('div');
+        s.className = 'star'; s.style.left = (5 + i * 10) + '%';
+        s.style.animationDelay = (i * 0.8) + 's'; sb.appendChild(s);
+    }
+
+    // Навигация
+    document.querySelectorAll('.nav-btn').forEach(b =>
+        b.addEventListener('click', e => { e.preventDefault(); navigate(b.dataset.page); }));
+
+    // Настройки
+    const panel = document.getElementById('settings-panel');
+    document.getElementById('settings-btn').addEventListener('click', e => { e.stopPropagation(); panel.classList.toggle('open'); });
+    document.addEventListener('click', e => { if (!panel.contains(e.target) && e.target.id !== 'settings-btn') panel.classList.remove('open'); });
+    document.querySelectorAll('.theme-btn').forEach(b => b.addEventListener('click', () => { setTheme(b.dataset.theme); Audio_.click(); }));
+    document.getElementById('sound-on').checked = S.sound;
+    document.getElementById('sound-on').addEventListener('change', e => { S.sound = e.target.checked; save(); });
+    document.getElementById('engine-select').value = S.engine;
+    document.getElementById('engine-select').addEventListener('change', e => { S.engine = e.target.value; save(); Audio_.click(); });
+    document.getElementById('reset-coins').addEventListener('click', () => { S.coins = 0; S.tea = 0; save(); updateUI(); Audio_.click(); });
+
+    // Хомяк
+    const ham = document.getElementById('hamster');
+    ham.addEventListener('click', e => {
+        e.stopPropagation();
+        ham.classList.remove('tap'); void ham.offsetWidth; ham.classList.add('tap');
+        S.coins++; save(); updateUI();
+        spawnCoin(e.clientX, e.clientY);
+        Audio_.click();
+    });
+
+    // Чайник
+    document.getElementById('teapot-link').addEventListener('click', e => {
+        e.preventDefault();
+        document.getElementById('teapot-modal').classList.add('active');
+        S.tea++; save(); updateUI();
+        Audio_.whistle();
+    });
+    document.getElementById('teapot-close').onclick = closeLB;
+    document.getElementById('teapot-sound-btn').onclick = Audio_.whistle;
+});
