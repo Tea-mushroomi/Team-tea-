@@ -1,4 +1,3 @@
-// ===== 40 СТИЛЕЙ =====
 const STYLES = {
     "Без стиля": "",
     "Сталинка / неоклассика 1950-х": "Stalin-era neoclassical architecture, ornate cornice, arched windows, pastel colors",
@@ -73,13 +72,8 @@ function toBase64(url) {
             const c = document.createElement('canvas');
             let w = i.naturalWidth, h = i.naturalHeight;
             const m = 800;
-            if (w > m || h > m) {
-                const r = Math.min(m / w, m / h);
-                w = Math.round(w * r);
-                h = Math.round(h * r);
-            }
-            c.width = w;
-            c.height = h;
+            if (w > m || h > m) { const r = Math.min(m / w, m / h); w = Math.round(w * r); h = Math.round(h * r); }
+            c.width = w; c.height = h;
             c.getContext('2d').drawImage(i, 0, 0, w, h);
             res(c.toDataURL('image/jpeg', 0.7));
         };
@@ -88,44 +82,17 @@ function toBase64(url) {
     });
 }
 
-function compressBase64(base64, maxDim) {
-    return new Promise((res) => {
-        const i = new Image();
-        i.onload = () => {
-            const c = document.createElement('canvas');
-            let w = i.naturalWidth, h = i.naturalHeight;
-            if (w > maxDim || h > maxDim) {
-                const r = Math.min(maxDim / w, maxDim / h);
-                w = Math.round(w * r);
-                h = Math.round(h * r);
-            }
-            c.width = w;
-            c.height = h;
-            c.getContext('2d').drawImage(i, 0, 0, w, h);
-            res(c.toDataURL('image/jpeg', 0.6));
-        };
-        i.src = base64;
-    });
-}
-
 const Aud = (() => {
     let c;
-    const g = () => {
-        if (!c) c = new (window.AudioContext || window.webkitAudioContext)();
-        return c;
-    };
+    const g = () => { if (!c) c = new (window.AudioContext || window.webkitAudioContext)(); return c; };
     const t = (f, tp, d, v) => {
         if (!S.sound) return;
         try {
             const x = g(), o = x.createOscillator(), gn = x.createGain();
-            o.type = tp;
-            o.frequency.setValueAtTime(f, x.currentTime);
+            o.type = tp; o.frequency.setValueAtTime(f, x.currentTime);
             gn.gain.setValueAtTime(v || 0.1, x.currentTime);
             gn.gain.exponentialRampToValueAtTime(0.001, x.currentTime + d);
-            o.connect(gn);
-            gn.connect(x.destination);
-            o.start();
-            o.stop(x.currentTime + d);
+            o.connect(gn); gn.connect(x.destination); o.start(); o.stop(x.currentTime + d);
         } catch (e) {}
     };
     return {
@@ -135,76 +102,14 @@ const Aud = (() => {
         whistle: () => {
             if (!S.sound) return;
             try {
-                async function restoreImage(originalBase64, description, style) {
-    const styleDesc = STYLES[style] || '';
-
-    // Анализируем оригинал: извлекаем цвета и тон для описания
-    const analysis = await new Promise((res) => {
-        const img = new Image();
-        img.onload = () => {
-            const c = document.createElement('canvas');
-            c.width = 32; c.height = 32;
-            const ctx = c.getContext('2d');
-            ctx.drawImage(img, 0, 0, 32, 32);
-            const data = ctx.getImageData(0, 0, 32, 32).data;
-            let r = 0, g = 0, b = 0, n = 0;
-            for (let i = 0; i < data.length; i += 4) {
-                r += data[i]; g += data[i+1]; b += data[i+2]; n++;
-            }
-            r = Math.round(r/n); g = Math.round(g/n); b = Math.round(b/n);
-            const lum = 0.299*r + 0.587*g + 0.114*b;
-            const tone = lum < 90 ? 'dark moody atmosphere' : (lum > 170 ? 'bright daylight' : 'soft natural light');
-            let hue = 'gray weathered stone';
-            if (r > g + 20 && r > b + 20) hue = 'reddish brick walls';
-            else if (g > r + 10 && g > b + 10) hue = 'greenish overgrown facade';
-            else if (b > r + 10 && b > g + 10) hue = 'bluish stone facade';
-            else if (r > 150 && g > 130 && b < 100) hue = 'warm yellow plaster walls';
-            res(tone + ', ' + hue + ', aged texture, weathered surface');
-        };
-        img.onerror = () => res('old building, weathered facade, aged texture');
-        img.src = originalBase64;
-    });
-
-    // Формируем мощный промпт для реставрации
-    const restorePrompt = [
-        'beautiful restored building facade',
-        'pristine condition',
-        'newly repaired walls',
-        'intact complete windows with glass',
-        'clean restored facade',
-        'no damage no cracks no ruins',
-        'fully reconstructed',
-        'architectural photography',
-        analysis,
-        description,
-        styleDesc,
-        BLD
-    ].filter(Boolean).join(', ');
-
-    const p = encodeURIComponent(restorePrompt);
-    const n = encodeURIComponent(NEG + ',ruins,damage,cracks,broken,destroyed,abandoned,graffiti,dirt,stains');
-    const seed = Math.floor(Math.random() * 999999);
-
-    // Используем обычный text-to-image (без &image= который не работает)
-    // Но с очень детальным промптом основанным на анализе оригинала
-    const models = ['flux', 'sana', 'turbo', 'sdxl'];
-    const errs = [];
-
-    for (const model of models) {
-        try {
-            const url = 'https://image.pollinations.ai/prompt/' + p +
-                '?width=1024&height=1024&seed=' + seed +
-                '&nologo=true&negative=' + n +
-                '&model=' + model;
-            const b64 = await toBase64(url);
-            return { url: b64, engine: 'Restoration (' + model + ')' };
-        } catch (e) {
-            errs.push(model + ': ' + (e.message || 'unknown error'));
-            console.warn('Restore ' + model + ' failed:', e.message);
-        }
-    }
-    throw new Error('Реставрация не удалась:\n' + errs.join('\n'));
-                }
+                const x = g(), o = x.createOscillator(), gn = x.createGain();
+                o.frequency.setValueAtTime(880, x.currentTime);
+                o.frequency.exponentialRampToValueAtTime(1760, x.currentTime + 0.4);
+                gn.gain.setValueAtTime(0.001, x.currentTime);
+                gn.gain.linearRampToValueAtTime(0.3, x.currentTime + 0.1);
+                gn.gain.exponentialRampToValueAtTime(0.001, x.currentTime + 1.2);
+                o.connect(gn); gn.connect(x.destination); o.start(); o.stop(x.currentTime + 1.3);
+            } catch (e) {}
         }
     };
 })();
@@ -222,33 +127,58 @@ async function genWithFallback(prompt, seed) {
     const errs = [];
     for (const m of models) {
         try { return await generate(prompt, seed, m); }
-        catch (e) { errs.push(m + ': ' + e.message); console.warn(m + ' failed:', e.message); }
+        catch (e) { errs.push(m + ': ' + (e.message || 'unknown')); console.warn(m + ' failed:', e.message); }
     }
     throw new Error('Все модели недоступны:\n' + errs.join('\n'));
 }
 
 async function restoreImage(originalBase64, description, style) {
-    const compressed = await compressBase64(originalBase64, 512);
     const styleDesc = STYLES[style] || '';
-    const restorePrompt = ['restored building facade','repaired walls','intact windows','clean facade','no damage','no cracks','no ruins',description,styleDesc,BLD].filter(Boolean).join(', ');
+    const analysis = await new Promise((res) => {
+        const img = new Image();
+        img.onload = () => {
+            const c = document.createElement('canvas');
+            c.width = 32; c.height = 32;
+            const ctx = c.getContext('2d');
+            ctx.drawImage(img, 0, 0, 32, 32);
+            const data = ctx.getImageData(0, 0, 32, 32).data;
+            let r = 0, g = 0, b = 0, n = 0;
+            for (let i = 0; i < data.length; i += 4) { r += data[i]; g += data[i+1]; b += data[i+2]; n++; }
+            r = Math.round(r/n); g = Math.round(g/n); b = Math.round(b/n);
+            const lum = 0.299*r + 0.587*g + 0.114*b;
+            const tone = lum < 90 ? 'dark moody atmosphere' : (lum > 170 ? 'bright daylight' : 'soft natural light');
+            let hue = 'gray weathered stone';
+            if (r > g + 20 && r > b + 20) hue = 'reddish brick walls';
+            else if (g > r + 10 && g > b + 10) hue = 'greenish overgrown facade';
+            else if (b > r + 10 && b > g + 10) hue = 'bluish stone facade';
+            else if (r > 150 && g > 130 && b < 100) hue = 'warm yellow plaster walls';
+            res(tone + ', ' + hue + ', aged texture, weathered surface');
+        };
+        img.onerror = () => res('old building, weathered facade, aged texture');
+        img.src = originalBase64;
+    });
+    const restorePrompt = [
+        'beautiful restored building facade', 'pristine condition', 'newly repaired walls',
+        'intact complete windows with glass', 'clean restored facade', 'no damage no cracks no ruins',
+        'fully reconstructed', 'architectural photography', analysis, description, styleDesc, BLD
+    ].filter(Boolean).join(', ');
     const p = encodeURIComponent(restorePrompt);
-    const n = encodeURIComponent(NEG + ',ruins,damage,cracks,broken,destroyed,abandoned');
+    const n = encodeURIComponent(NEG + ',ruins,damage,cracks,broken,destroyed,abandoned,graffiti,dirt,stains');
     const seed = Math.floor(Math.random() * 999999);
-    const refEncoded = encodeURIComponent(compressed);
-    const models = ['flux', 'sana', 'turbo'];
+    const models = ['flux', 'sana', 'turbo', 'sdxl'];
     const errs = [];
     for (const model of models) {
         try {
-            const url = 'https://image.pollinations.ai/prompt/' + p + '?width=1024&height=1024&seed=' + seed + '&nologo=true&negative=' + n + '&model=' + model + '&image=' + refEncoded + '&strength=0.6';
+            const url = 'https://image.pollinations.ai/prompt/' + p + '?width=1024&height=1024&seed=' + seed + '&nologo=true&negative=' + n + '&model=' + model;
             const b64 = await toBase64(url);
             return { url: b64, engine: 'Restoration (' + model + ')' };
-        } catch (e) { errs.push(model + ': ' + e.message); console.warn('Restore ' + model + ' failed:', e.message); }
+        } catch (e) { errs.push(model + ': ' + (e.message || 'unknown error')); console.warn('Restore ' + model + ' failed:', e.message); }
     }
     throw new Error('Реставрация не удалась:\n' + errs.join('\n'));
 }
 
-// ===== КОНЕЦ ЧАСТИ 1 ИЗ 2 =====
-// ===== НАЧАЛО ЧАСТИ 2 ИЗ 2 =====
+// ===== КОНЕЦ ЧАСТИ 1 =====
+// ===== НАЧАЛО ЧАСТИ 2 =====
 
 let curPage = 'generate';
 let lastPrompt = '';
@@ -283,7 +213,6 @@ function navigate(page) {
 function renderPage(page) {
     const m = document.getElementById('main-content'); m.innerHTML = '';
     const c = document.createElement('div'); c.className = 'card gothic-card';
-
     if (page === 'generate') {
         c.innerHTML = '<h2 class="page-title">📝 Генерация здания</h2><div class="form-grid"><div class="form-group full-width"><label>Описание</label><textarea id="gp" placeholder="Опишите здание подробно..."></textarea></div><div class="form-group"><label>Стиль (' + Object.keys(STYLES).length + ')</label><select id="gs">' + Object.keys(STYLES).map(s => '<option>' + s + '</option>').join('') + '</select></div><div class="form-group"><label>Seed</label><input type="number" id="gseed" placeholder="Случайно"></div></div><button class="btn gothic-btn" id="btn-gen">✨ Создать проект</button><div id="res-area"></div>';
     } else if (page === 'restore') {
@@ -305,7 +234,7 @@ function renderPage(page) {
         const tot = S.learn.l + S.learn.d; const acc = tot ? Math.round(S.learn.l / tot * 100) : 0;
         c.innerHTML = '<h2 class="page-title">🧠 Обучение</h2><div class="learning-stats"><div class="stat-card"><div class="stat-value">' + S.learn.g + '</div>Генераций</div><div class="stat-card"><div class="stat-value" style="color:var(--success)">' + S.learn.l + '</div>Лайков</div><div class="stat-card"><div class="stat-value" style="color:var(--error)">' + S.learn.d + '</div>Дизлайков</div><div class="stat-card"><div class="stat-value" style="color:var(--grad-b)">' + acc + '%</div>Точность</div></div>';
     } else {
-        c.innerHTML = '<h2 class="page-title">ℹ️ О проекте</h2><p><b>Реставратор фасадов</b> — полностью клиентская JS-версия.<br>40 архитектурных стилей · Sana + Flux + Turbo + Horde<br>Реставрация использует img2img — ИИ достраивает разрушенные части по описанию.<br>Галерея сохраняется локально в браузере.</p>';
+        c.innerHTML = '<h2 class="page-title">ℹ️ О проекте</h2><p><b>Реставратор фасадов</b> — полностью клиентская JS-версия.<br>40 архитектурных стилей · Sana + Flux + Turbo + Horde<br>Реставрация анализирует фото и генерирует восстановленную версию.<br>Галерея сохраняется локально в браузере.</p>';
     }
     m.appendChild(c); bindPage(); bindGalleryButtons();
 }
@@ -361,7 +290,7 @@ function bindPage() {
         const fileInput = document.getElementById('rf'); const desc = document.getElementById('rp').value.trim(); const style = document.getElementById('rs').value;
         if (!fileInput.files[0]) return alert('Загрузите фото здания');
         if (!desc) return alert('Опишите, что нужно восстановить');
-        showLoad('🏗️ Реставрация фасада...\nИИ достраивает утраченные части');
+        showLoad('🏗️ Реставрация фасада...\nИИ анализирует фото и достраивает утраченные части');
         const reader = new FileReader();
         reader.onload = async (e) => {
             try {
