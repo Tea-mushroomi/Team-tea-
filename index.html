@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>🏛️ Реставратор фасадов</title>
 <link rel="stylesheet" href="style.css">
+<script src="https://js.puter.com/v2/"></script>
 </head>
 <body data-theme="gothic">
 
@@ -20,14 +21,34 @@
     </div>
     <label class="set-row"><input type="checkbox" id="sound-on" checked> 🔊 Звук</label>
     <div class="set-row" style="flex-direction:column;align-items:flex-start;gap:4px;margin-top:8px">
-        <small style="color:var(--text-dim)">Движок:</small>
-        <select id="engine-select" style="width:100%;padding:6px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:var(--font)">
-            <option value="pollinations">Pollinations (Sana/Flux/Turbo)</option>
-            <option value="horde">AI Horde</option>
-            <option value="canvas">Canvas (Offline)</option>
+        <small style="color:var(--text-dim)">Модель:</small>
+        <select id="model-select" style="width:100%;padding:6px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:var(--font)">
+            <option value="flux">Flux (быстрая)</option>
+            <option value="gpt-image-1">GPT Image (качественная)</option>
+            <option value="dall-e-3">DALL-E 3</option>
+            <option value="stable-diffusion-3-medium">Stable Diffusion 3</option>
         </select>
     </div>
     <button class="btn btn-secondary" id="reset-coins" style="width:100%;margin-top:12px">♻️ Сброс валюты</button>
+</div>
+
+<!-- Чат поддержки -->
+<button class="chat-btn" id="chat-btn">💬</button>
+<div class="chat-panel" id="chat-panel">
+    <div class="chat-header"><h4>💬 Поддержка</h4><button class="chat-close" id="chat-close">×</button></div>
+    <div class="chat-messages" id="chat-messages">
+        <div class="chat-msg bot">Привет! Выберите вопрос:</div>
+    </div>
+    <div class="chat-quick" id="chat-quick">
+        <button class="chat-q" data-q="generate">Не генерирует</button>
+        <button class="chat-q" data-q="restore">Не реставрирует</button>
+        <button class="chat-q" data-q="gallery">Галерея</button>
+        <button class="chat-q" data-q="footer">Подвал глючит</button>
+        <button class="chat-q" data-q="hamster">Хомяк</button>
+        <button class="chat-q" data-q="teapot">Где чайник?</button>
+        <button class="chat-q" data-q="slow">Медленно</button>
+        <button class="chat-q" data-q="styles">Стили</button>
+    </div>
 </div>
 
 <div class="stars-container" id="stars"></div>
@@ -40,18 +61,25 @@
 
 <div class="loading-overlay" id="loading-overlay">
     <div class="loading-box">
-        <div class="hamster-wheel">
-            <div class="wheel"></div>
-            <div class="hamster" id="hamster">🐹</div>
-        </div>
+        <div class="hamster-wheel"><div class="wheel"></div><div class="hamster" id="hamster">🐹</div></div>
         <div class="loading-text" id="loading-text">🐹 Генерируем здание...</div>
         <div class="loading-hint">Тапай хомяка — получай монеты 🪙</div>
     </div>
 </div>
 
+<!-- Lightbox для картинок (отдельная модалка) -->
+<div class="lightbox-modal" id="lightbox-modal">
+    <div class="lightbox-inner">
+        <button class="lb-close-btn" id="lb-close-btn">×</button>
+        <img id="lb-img" src="" alt="">
+        <div class="lb-info" id="lb-info"></div>
+    </div>
+</div>
+
+<!-- Модалка чайника (отдельная) -->
 <div class="teapot-modal" id="teapot-modal">
     <div class="teapot-box">
-        <button class="lightbox-close" id="teapot-close">×</button>
+        <button class="teapot-close-btn" id="teapot-close-btn">×</button>
         <div style="font-size:100px">🫖</div>
         <h2>418 — Я чайник!</h2>
         <p>+1 🍵 чайный пакетик!</p>
@@ -65,7 +93,7 @@
     <div class="badges">
         <span class="badge">💻 Pure JS</span>
         <span class="badge">🎨 40 стилей</span>
-        <span class="badge">🧠 Sana + Flux</span>
+        <span class="badge">🧠 Puter.js AI</span>
     </div>
 </header>
 
@@ -81,24 +109,10 @@
 
 <footer class="footer">
     <div class="footer-grid">
-        <div class="footer-col">
-            <h4>🏛️ Реставратор фасадов</h4>
-            <p>JS-версия с ИИ для архитектуры.</p>
-        </div>
-        <div class="footer-col">
-            <h4>Статистика</h4>
-            <p>Генераций: <span id="f-gens">0</span> · 👍 <span id="f-likes">0</span> · 👎 <span id="f-dislikes">0</span></p>
-            <p>Точность: <span id="f-acc">0</span>%</p>
-        </div>
-        <div class="footer-col">
-            <h4>Датасет</h4>
-            <p>Стилей: 40</p>
-        </div>
-        <div class="footer-col">
-            <h4>Технологии</h4>
-            <p>Sana · Flux · Turbo · Horde</p>
-            <a class="teapot-link" href="#" id="teapot-link">🫖</a>
-        </div>
+        <div class="footer-col"><h4>🏛️ Реставратор фасадов</h4><p>JS-версия с ИИ для архитектуры.</p></div>
+        <div class="footer-col"><h4>Статистика</h4><p>Генераций: <span id="f-gens">0</span> · 👍 <span id="f-likes">0</span> · 👎 <span id="f-dislikes">0</span></p><p>Точность: <span id="f-acc">0</span>%</p></div>
+        <div class="footer-col"><h4>Датасет</h4><p>Стилей: 40</p></div>
+        <div class="footer-col"><h4>Технологии</h4><p>Puter.js · Flux · GPT Image · DALL-E</p><a class="teapot-link" href="#" id="teapot-link">🫖</a></div>
     </div>
     <div class="footer-bottom"><p>© 2026 Реставратор фасадов</p></div>
 </footer>
