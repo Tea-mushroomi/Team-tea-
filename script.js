@@ -354,9 +354,158 @@ function renderPage(page) {
             'Галерея сохраняется локально в браузере.</p>';
     }
 
-    m.appendChild(c);
-    bindPage();
+    unshift(r);
+        if (S.history.length > 50) S.history = S.history.slice(0, 50);
+        S.learn.g++;
+        save();
+        updateUI();
+        showResult(r);
+        Aud.ok();
+    } catch (e) {
+        console.error('Generation error:', e);
+        showError(e.message + '\n\nПопробуйте другой движок ⚙️');
+        Aud.err();
+    } finally {
+        hideLoad();
+    }
 }
+
+function bindPage() {
+    const gb = document.getElementById('btn-gen');
+    if (gb) {
+        gb.onclick = () => {
+            const p = document.getElementById('gp').value.trim();
+            const s = document.getElementById('gs').value;
+            if (!p && s === 'Без стиля') return alert('Введите описание или выберите стиль');
+            doGen(p, s);
+        };
+    }
+
+    const rb = document.getElementById('btn-res');
+    if (rb) {
+        rb.onclick = async () => {
+            const fileInput = document.getElementById('rf');
+            const desc = document.getElementById('rp').value.trim();
+            const style = document.getElementById('rs').value;
+
+            if (!fileInput.files[0]) return alert('Загрузите фото здания');
+            if (!desc) return alert('Опишите, что нужно восстановить');
+
+            showLoad('🏗️ Реставрация фасада...\nИИ достраивает утраченные части');
+
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const originalBase64 = e.target.result;
+                    const r = await restoreImage(originalBase64, desc, style);
+                    r.style = style;
+                    r.date = new Date().toISOString();
+                    S.history.unshift(r);
+                    if (S.history.length > 50) S.history = S.history.slice(0, 50);
+                    S.learn.g++;
+                    save();
+                    updateUI();
+                    showResult(r);
+                    Aud.ok();
+                } catch (err) {
+                    console.error('Restore error:', err);
+                    showError(err.message + '\n\nПопробуйте:\n• Упростить описание\n• Выбрать другой стиль\n• Повторить попытку');
+                    Aud.err();
+                } finally {
+                    hideLoad();
+                }
+            };
+            reader.readAsDataURL(fileInput.files[0]);
+        };
+    }
+}
+
+// ===== ИНИЦИАЛИЗАЦИЯ =====
+document.addEventListener('DOMContentLoaded', () => {
+    setTheme(S.theme);
+    updateUI();
+    renderPage('generate');
+
+    const sb = document.getElementById('stars');
+    for (let i = 0; i < 9; i++) {
+        const s = document.createElement('div');
+        s.className = 'star';
+        s.style.left = (5 + i * 10) + '%';
+        s.style.animationDelay = (i * 0.8) + 's';
+        sb.appendChild(s);
+    }
+
+    document.querySelectorAll('.nav-btn').forEach(b =>
+        b.addEventListener('click', e => {
+            e.preventDefault();
+            navigate(b.dataset.page);
+        })
+    );
+
+    const panel = document.getElementById('settings-panel');
+    document.getElementById('settings-btn').addEventListener('click', e => {
+        e.stopPropagation();
+        panel.classList.toggle('open');
+    });
+    document.addEventListener('click', e => {
+        if (!panel.contains(e.target) && e.target.id !== 'settings-btn') {
+            panel.classList.remove('open');
+        }
+    });
+
+    document.querySelectorAll('.theme-btn').forEach(b =>
+        b.addEventListener('click', () => {
+            setTheme(b.dataset.theme);
+            Aud.click();
+        })
+    );
+
+    document.getElementById('sound-on').checked = S.sound;
+    document.getElementById('sound-on').addEventListener('change', e => {
+        S.sound = e.target.checked;
+        save();
+    });
+
+    document.getElementById('engine-select').value = S.engine;
+    document.getElementById('engine-select').addEventListener('change', e => {
+        S.engine = e.target.value;
+        save();
+        Aud.click();
+    });
+
+    document.getElementById('reset-coins').addEventListener('click', () => {
+        S.coins = 0;
+        S.tea = 0;
+        save();
+        updateUI();
+        Aud.click();
+    });
+
+    const ham = document.getElementById('hamster');
+    ham.addEventListener('click', e => {
+        e.stopPropagation();
+        ham.classList.remove('tap');
+        void ham.offsetWidth;
+        ham.classList.add('tap');
+        S.coins++;
+        save();
+        updateUI();
+        spawnCoin(e.clientX, e.clientY);
+        Aud.click();
+    });
+
+    document.getElementById('teapot-link').addEventListener('click', e => {
+        e.preventDefault();
+        document.getElementById('teapot-modal').classList.add('active');
+        S.tea++;
+        save();
+        updateUI();
+        Aud.whistle();
+    });
+
+    document.getElementById('teapot-close').onclick = closeLB;
+    document.getElementById('teapot-sound-btn').onclick = Aud.whistle;
+});
 
 function showResult(data) {
     const a = document.getElementById('res-area');
