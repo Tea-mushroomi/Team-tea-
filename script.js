@@ -1,4 +1,4 @@
-// ===== 40 СТИЛЕЙ (ПОЛНЫЙ СПИСОК ИЗ ОРИГИНАЛА) =====
+// ===== 40 СТИЛЕЙ (ПОЛНЫЙ СПИСОК) =====
 const STYLES = {
     "Без стиля": "",
     "Сталинка / неоклассика 1950-х": "Stalin-era neoclassical architecture, ornate cornice, arched windows, pastel colors",
@@ -42,8 +42,8 @@ const STYLES = {
     "Исламская архитектура": "islamic architecture, geometric patterns, horseshoe arches, minaret, dome"
 };
 
-const NEGATIVE = "people,humans,crowd,faces,animals,blurry,low quality,deformed,watermark,text";
-const BUILDING = "architecture only,building exterior only,facade,no people,no interior";
+const NEGATIVE = "people,humans,crowd,faces,animals,blurry,low quality,deformed,watermark,text,signature";
+const BUILDING = "architecture only,building exterior only,facade,no people,no interior,photorealistic";
 
 // ===== СОСТОЯНИЕ =====
 const S = {
@@ -98,39 +98,83 @@ const Audio_ = (() => {
     };
 })();
 
-// ===== ДВИЖКИ =====
+// ===== ДВИЖКИ (С МОДЕЛЬЮ SANA) =====
 const Engine = {
+    _loadImage: (url, timeoutMs = 180000) => new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        const timer = setTimeout(() => {
+            img.onload = null;
+            img.onerror = null;
+            reject(new Error('Таймаут генерации (' + timeoutMs / 1000 + 'с). Попробуйте ещё раз.'));
+        }, timeoutMs);
+        img.onload = () => {
+            clearTimeout(timer);
+            if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                resolve(img);
+            } else {
+                reject(new Error('Получено пустое изображение'));
+            }
+        };
+        img.onerror = () => {
+            clearTimeout(timer);
+            reject(new Error('Ошибка загрузки. Проверьте интернет или попробуйте другой движок.'));
+        };
+        img.src = url;
+    }),
+
     pollinations: async (prompt, seed) => {
-        const p = encodeURIComponent(prompt + ',' + BUILDING + ',highly detailed,8k');
+        const p = encodeURIComponent(prompt + ',' + BUILDING + ',highly detailed,8k,masterpiece');
         const n = encodeURIComponent(NEGATIVE);
-        const url = `https://image.pollinations.ai/prompt/${p}?width=1024&height=1024&seed=${seed}&nologo=true&negative=${n}&model=flux`;
-        return await Engine._load(url, 'Pollinations Flux');
+        // 4 модели: flux → sana → turbo → sdxl
+        const models = ['flux', 'sana', 'turbo', 'sdxl'];
+        for (const model of models) {
+            try {
+                const url = `https://image.pollinations.ai/prompt/${p}?width=1024&height=1024&seed=${seed}&nologo=true&negative=${n}&model=${model}`;
+                await Engine._loadImage(url, 180000);
+                return { url, engine: `Pollinations (${model})` };
+            } catch (e) {
+                console.warn(`Модель ${model} не ответила, пробуем следующую...`);
+                continue;
+            }
+        }
+        throw new Error('Все модели Pollinations недоступны. Проверьте интернет.');
     },
+
+    sana: async (prompt, seed) => {
+        const p = encodeURIComponent(prompt + ',' + BUILDING + ',highly detailed,8k,masterpiece');
+        const n = encodeURIComponent(NEGATIVE);
+        const url = `https://image.pollinations.ai/prompt/${p}?width=1024&height=1024&seed=${seed}&nologo=true&negative=${n}&model=sana`;
+        await Engine._loadImage(url, 180000);
+        return { url, engine: 'Sana (Direct)' };
+    },
+
     horde: async (prompt, seed) => {
-        const p = encodeURIComponent(prompt + ',' + BUILDING + ',stable diffusion,highly detailed');
+        const p = encodeURIComponent(prompt + ',' + BUILDING + ',stable diffusion,highly detailed,best quality');
         const url = `https://image.pollinations.ai/prompt/${p}?width=1024&height=1024&seed=${seed}&nologo=true&model=flux-realism`;
-        return await Engine._load(url, 'AI Horde');
+        await Engine._loadImage(url, 180000);
+        return { url, engine: 'AI Horde (Flux Realism)' };
     },
+
     canvas: async (base64) => {
-        return new Promise(res => {
+        return new Promise((resolve, reject) => {
             const img = new Image();
             img.onload = () => {
-                const c = document.createElement('canvas');
-                c.width = img.width; c.height = img.height;
-                const x = c.getContext('2d');
-                x.filter = 'contrast(1.2) saturate(1.3) brightness(1.1)';
-                x.drawImage(img, 0, 0);
-                res({ url: c.toDataURL('image/png'), engine: 'Canvas Offline' });
+                try {
+                    const c = document.createElement('canvas');
+                    c.width = img.width; c.height = img.height;
+                    const x = c.getContext('2d');
+                    x.filter = 'contrast(1.2) saturate(1.3) brightness(1.1)';
+                    x.drawImage(img, 0, 0);
+                    resolve({ url: c.toDataURL('image/png'), engine: 'Canvas Offline' });
+                } catch (e) {
+                    reject(new Error('Ошибка обработки Canvas'));
+                }
             };
+            img.onerror = () => reject(new Error('Не удалось прочитать изображение'));
             img.src = base64;
         });
-    },
-    _load: (url, name) => new Promise((res, rej) => {
-        const img = new Image(); img.crossOrigin = 'anonymous'; img.src = url;
-        img.onload = () => res({ url, engine: name });
-        img.onerror = () => rej(new Error('Ошибка загрузки'));
-        setTimeout(() => rej(new Error('Таймаут')), 90000);
-    })
+    }
 };
 
 // ===== ПРИЛОЖЕНИЕ =====
@@ -190,23 +234,23 @@ function renderPage(page) {
         c.innerHTML = `
             <h2 class="page-title">📝 Генерация здания</h2>
             <div class="form-grid">
-                <div class="form-group full-width"><label>Описание</label><textarea id="gp" placeholder="Опишите здание..."></textarea></div>
+                <div class="form-group full-width"><label>Описание</label><textarea id="gp" placeholder="Опишите здание подробно: материалы, освещение, детали фасада..."></textarea></div>
                 <div class="form-group"><label>Стиль (${Object.keys(STYLES).length})</label><select id="gs">${Object.keys(STYLES).map(s => `<option>${s}</option>`).join('')}</select></div>
-                <div class="form-group"><label>Seed</label><input type="number" id="gseed" placeholder="Random"></div>
+                <div class="form-group"><label>Seed</label><input type="number" id="gseed" placeholder="Случайно"></div>
             </div>
             <button class="btn gothic-btn" id="btn-gen">✨ Создать проект</button>
             <div id="res-area"></div>`;
     } else if (page === 'restore') {
         c.innerHTML = `
             <h2 class="page-title">🔨 Реставрация фасада</h2>
-            <p style="color:var(--text-muted);margin-bottom:20px">Загрузите фото. Движок: ${S.engine}</p>
-            <div class="form-grid"><div class="form-group full-width"><label>Фото</label><input type="file" id="rf" accept="image/*"></div></div>
+            <p style="color:var(--text-muted);margin-bottom:20px">Загрузите фото старого здания для улучшения качества.</p>
+            <div class="form-grid"><div class="form-group full-width"><label>Фотография</label><input type="file" id="rf" accept="image/*"></div></div>
             <button class="btn gothic-btn" id="btn-res">🏗️ Начать реставрацию</button>
             <div id="res-area"></div>`;
     } else if (page === 'gallery') {
         c.innerHTML = `<h2 class="page-title">🖼️ Галерея</h2>`;
         if (!S.history.length) {
-            c.innerHTML += `<p style="text-align:center;padding:40px;color:var(--text-muted)">Галерея пуста</p>`;
+            c.innerHTML += `<p style="text-align:center;padding:40px;color:var(--text-muted)">Галерея пуста. Создайте первый проект!</p>`;
         } else {
             const g = document.createElement('div'); g.className = 'gallery-grid';
             S.history.forEach(i => {
@@ -227,7 +271,7 @@ function renderPage(page) {
                 <div class="stat-card"><div class="stat-value" style="color:var(--grad-b)">${acc}%</div>Точность</div>
             </div>`;
     } else {
-        c.innerHTML = `<h2 class="page-title">ℹ️ О проекте</h2><p>Реставратор фасадов — JS-версия.<br>40 стилей · 3 движка · Без API-ключей.</p>`;
+        c.innerHTML = `<h2 class="page-title">ℹ️ О проекте</h2><p><b>Реставратор фасадов</b> — полностью клиентская JS-версия.<br>40 архитектурных стилей · 4 движка (Flux, Sana, Horde, Canvas) · Работает без API-ключей и сервера.</p>`;
     }
 
     m.appendChild(c);
@@ -277,38 +321,70 @@ function closeLB() {
 function bindPage() {
     const genBtn = document.getElementById('btn-gen');
     if (genBtn) genBtn.onclick = async () => {
-        const prompt = document.getElementById('gp').value;
+        const prompt = document.getElementById('gp').value.trim();
         const style = document.getElementById('gs').value;
         const seed = document.getElementById('gseed').value || Math.floor(Math.random() * 999999);
+
         if (!prompt && style === 'Без стиля') return alert('Введите описание или выберите стиль');
-        const full = prompt + ', ' + (STYLES[style] || '');
-        showLoad('🎨 Генерация через ' + S.engine + '...');
+
+        const full = [prompt, STYLES[style]].filter(Boolean).join(', ');
+        showLoad(`🎨 Генерация через ${S.engine}...\n(может занять до 3 минут)`);
+
         try {
             let r;
-            if (S.engine === 'horde') r = await Engine.horde(full, seed);
-            else if (S.engine === 'canvas') { alert('Canvas только для реставрации. Выберите облачный движок.'); hideLoad(); return; }
-            else r = await Engine.pollinations(full, seed);
-            r.style = style; r.date = new Date().toISOString();
-            S.history.unshift(r); S.learn.g++; save(); updateUI();
-            showResult(r); Audio_.ok();
-        } catch (e) { alert('Ошибка: ' + e.message); Audio_.err(); }
-        finally { hideLoad(); }
+            if (S.engine === 'horde') {
+                r = await Engine.horde(full, seed);
+            } else if (S.engine === 'sana') {
+                r = await Engine.sana(full, seed);
+            } else if (S.engine === 'canvas') {
+                alert('Движок Canvas предназначен только для реставрации загруженных фото.\nПереключитесь на Pollinations, Sana или AI Horde для генерации.');
+                hideLoad();
+                return;
+            } else {
+                r = await Engine.pollinations(full, seed);
+            }
+
+            r.style = style;
+            r.date = new Date().toISOString();
+            S.history.unshift(r);
+            S.learn.g++;
+            save();
+            updateUI();
+            showResult(r);
+            Audio_.ok();
+        } catch (e) {
+            console.error('Generation error:', e);
+            alert('❌ Ошибка генерации:\n' + e.message + '\n\nПопробуйте:\n• Переключить движок в настройках\n• Проверить интернет\n• Повторить попытку');
+            Audio_.err();
+        } finally {
+            hideLoad();
+        }
     };
 
     const resBtn = document.getElementById('btn-res');
     if (resBtn) resBtn.onclick = async () => {
         const f = document.getElementById('rf').files[0];
-        if (!f) return alert('Загрузите изображение');
-        showLoad('🔨 Реставрация...');
+        if (!f) return alert('Выберите изображение для реставрации');
+
+        showLoad('🔨 Реставрация фасада...');
         const reader = new FileReader();
         reader.onload = async (e) => {
             try {
                 const r = await Engine.canvas(e.target.result);
-                r.style = 'Restored'; r.date = new Date().toISOString();
-                S.history.unshift(r); S.learn.g++; save(); updateUI();
-                showResult(r); Audio_.ok();
-            } catch (err) { alert('Ошибка: ' + err.message); Audio_.err(); }
-            finally { hideLoad(); }
+                r.style = 'Restored';
+                r.date = new Date().toISOString();
+                S.history.unshift(r);
+                S.learn.g++;
+                save();
+                updateUI();
+                showResult(r);
+                Audio_.ok();
+            } catch (err) {
+                alert('Ошибка реставрации: ' + err.message);
+                Audio_.err();
+            } finally {
+                hideLoad();
+            }
         };
         reader.readAsDataURL(f);
     };
@@ -334,32 +410,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Настройки
     const panel = document.getElementById('settings-panel');
-    document.getElementById('settings-btn').addEventListener('click', e => { e.stopPropagation(); panel.classList.toggle('open'); });
-    document.addEventListener('click', e => { if (!panel.contains(e.target) && e.target.id !== 'settings-btn') panel.classList.remove('open'); });
-    document.querySelectorAll('.theme-btn').forEach(b => b.addEventListener('click', () => { setTheme(b.dataset.theme); Audio_.click(); }));
-    document.getElementById('sound-on').checked = S.sound;
-    document.getElementById('sound-on').addEventListener('change', e => { S.sound = e.target.checked; save(); });
-    document.getElementById('engine-select').value = S.engine;
-    document.getElementById('engine-select').addEventListener('change', e => { S.engine = e.target.value; save(); Audio_.click(); });
-    document.getElementById('reset-coins').addEventListener('click', () => { S.coins = 0; S.tea = 0; save(); updateUI(); Audio_.click(); });
-
-    // Хомяк
-    const ham = document.getElementById('hamster');
-    ham.addEventListener('click', e => {
-        e.stopPropagation();
-        ham.classList.remove('tap'); void ham.offsetWidth; ham.classList.add('tap');
-        S.coins++; save(); updateUI();
-        spawnCoin(e.clientX, e.clientY);
-        Audio_.click();
-    });
-
-    // Чайник
-    document.getElementById('teapot-link').addEventListener('click', e => {
-        e.preventDefault();
-        document.getElementById('teapot-modal').classList.add('active');
-        S.tea++; save(); updateUI();
-        Audio_.whistle();
-    });
-    document.getElementById('teapot-close').onclick = closeLB;
-    document.getElementById('teapot-sound-btn').onclick = Audio_.whistle;
-});
+    document.getElementById('sett
