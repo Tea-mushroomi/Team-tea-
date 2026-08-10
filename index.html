@@ -3,132 +3,108 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Реставратор фасадов | PRO v3.2</title>
-<meta name="description" content="Реставратор фасадов - нейросеть для восстановления архитектуры">
+<title>🏛️ Реставратор фасадов</title>
 <link rel="stylesheet" href="style.css">
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=Montserrat:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
 <body data-theme="gothic">
 
-<!-- FX Слои -->
-<div class="stars-container" id="stars"></div>
-<canvas id="noise-canvas"></canvas>
-
-<!-- 🪙 Валюты -->
-<div class="corner-badge glass left">
-    <span title="Хомякоины">🪙 <b id="coin-num">0</b></span>
-    <span title="Чайные пакетики">🍵 <b id="tea-num">0</b></span>
+<!-- 🪙 Счётчик в правом верхнем углу -->
+<div class="corner-badge" title="hamstercoin · чайные пакетики">
+    <span>🪙 <b id="coin-num">0</b></span>
+    <span class="tb">🍵 <b id="tea-num">0</b></span>
 </div>
 
-<!-- ⚙️ ВЕРХНЯЯ ПАНЕЛЬ НАСТРОЕК -->
-<div class="top-settings-bar glass">
-    <div class="settings-group logo-text">
-        <strong>Реставратор фасадов</strong>
+<!-- ⚙️ Кнопка настроек -->
+<button class="settings-btn" id="settings-btn" title="Настройки">⚙️</button>
+<div class="settings-panel" id="settings-panel">
+    <h4>⚙️ Настройки</h4>
+    <div class="set-row">Тема:
+        <button class="theme-btn active" data-theme="gothic">🌙</button>
+        <button class="theme-btn" data-theme="mint">🍵</button>
+        <button class="theme-btn" data-theme="light">☀️</button>
     </div>
+    <label class="set-row"><input type="checkbox" id="sound-on" checked> 🔊 Звук</label>
     
-    <div class="settings-group">
-        <label>Тема:</label>
-        <div class="theme-switcher">
-            <button class="theme-btn active" data-theme="gothic">🌙</button>
-            <button class="theme-btn" data-theme="mint">🍵</button>
-            <button class="theme-btn" data-theme="light">☀️</button>
-            <button class="theme-btn" data-theme="cyber">🤖</button>
-        </div>
-    </div>
-    
-    <div class="settings-group">
-        <label>Движок:</label>
-        <select id="default-engine">
+    <div class="set-row" style="flex-direction:column; align-items:flex-start; gap:5px;">
+        <small>Движок генерации:</small>
+        <select id="engine-select" style="width:100%; padding:5px; background:var(--bg-input); color:var(--text); border:1px solid var(--border); border-radius:6px;">
             <option value="pollinations">🎨 Pollinations (Flux)</option>
             <option value="horde">🤖 AI Horde (Cloud)</option>
             <option value="canvas">🖌️ Canvas (Offline)</option>
         </select>
     </div>
 
-    <div class="settings-group mobile-hide">
-        <label class="checkbox"><input type="checkbox" id="sound-on" checked> 🔊</label>
-        <label class="checkbox"><input type="checkbox" id="auto-enhance" checked> 🧠</label>
-    </div>
-
-    <button class="btn-icon" id="data-menu-btn" title="База данных">💾</button>
+    <button class="btn btn-secondary" id="reset-coins" style="width:100%; margin-top:10px;">♻️ Сбросить валюту</button>
 </div>
 
-<!-- Выпадающее меню данных -->
-<div class="data-dropdown glass" id="data-dropdown">
-    <small style="color:var(--text-muted)">API Токен (опционально):</small>
-    <input type="password" id="api-token" placeholder="Вставьте ключ...">
-    <div class="data-actions">
-        <button class="btn btn-sm" id="export-data">Экспорт JSON</button>
-        <button class="btn btn-sm" id="import-trigger">Импорт JSON</button>
-        <input type="file" id="import-file" hidden accept=".json">
-    </div>
-    <button class="btn btn-danger btn-sm" id="reset-all">♻️ Сбросить всё</button>
+<div class="stars-container" id="stars"></div>
+<div class="fireflies">
+    <div class="firefly" style="top: 20%; left: 15%;"></div>
+    <div class="firefly" style="top: 60%; left: 80%; animation-delay: 2s;"></div>
+    <div class="firefly" style="top: 40%; left: 50%; animation-delay: 4s;"></div>
+    <div class="firefly" style="top: 75%; left: 25%; animation-delay: 1s;"></div>
 </div>
 
-<!-- 🐹 Оверлей загрузки -->
+<!-- 🐹 Оверлей генерации (Хомяк тапается здесь!) -->
 <div class="loading-overlay" id="loading-overlay">
-    <div class="loading-box glass">
-        <div class="hamster-wheel-container">
-            <div class="wheel-glow"></div>
+    <div class="loading-box">
+        <div class="hamster-wheel">
             <div class="wheel"></div>
             <div class="hamster" id="hamster" title="Тапай меня!">🐹</div>
         </div>
-        <div class="loading-text" id="loading-msg">Реставратор фасадов думает...</div>
-        <div class="loading-progress"><div class="bar" id="progress-bar"></div></div>
-        <div class="loading-sub">Тапай хомяка для ускорения!</div>
+        <div class="loading-text" id="loading-text">🐹 Хомяк бежит по колесу... генерируем здание!</div>
+        <div class="loading-hint">Тапай хомяка — получай hamstercoin 🪙</div>
     </div>
 </div>
 
-<!-- 🫖 Модалка Чайника (Скрытая пасхалка) -->
-<div class="modal teapot-modal" id="teapot-modal">
-    <div class="modal-content teapot-box glass">
-        <button class="close-btn">×</button>
-        <div class="teapot-scene">
-            <div class="steam-container"><div class="steam s1"></div><div class="steam s2"></div><div class="steam s3"></div></div>
-            <div class="teapot-visual">🫖</div>
-        </div>
-        <h2>Ошибка 418: Я чайник!</h2>
-        <p>Вы нашли секретный артефакт реставратора!</p>
-        <p class="reward-text">+1 🍵 Чайный пакетик</p>
-        <button class="btn gothic-btn pulse-btn" id="teapot-sound-btn">🔊 Посвистеть</button>
+<!-- 🫖 Модалка чайника -->
+<div class="teapot-modal" id="teapot-modal">
+    <div class="teapot-box">
+        <button class="lightbox-close" onclick="App.closeTeapot()">×</button>
+        <div id="teapot-visual" style="font-size:100px">🫖</div>
+        <h2>418 — Я чайник!</h2>
+        <p>+1 🍵 чайный пакетик!</p>
+        <button class="btn gothic-btn" onclick="AudioEngine.whistle()">🔊 Звук свистка</button>
     </div>
-</div>
-
-<!-- Lightbox -->
-<div class="lightbox" id="lightbox">
-    <button class="lb-close">×</button>
-    <img src="" alt="Full">
 </div>
 
 <header class="hero">
-    <div class="gothic-arch"><h1>Реставратор фасадов</h1></div>
-    <p class="subtitle">Профессиональный инструмент ИИ для архитектуры</p>
+    <div class="gothic-arch"><h1>🏛️ Реставратор фасадов</h1></div>
+    <p class="subtitle">Восстановление облика здания с помощью ИИ</p>
+    <div class="badges">
+        <span class="badge">💻 Pure JS</span>
+        <span class="badge">🎨 40 стилей</span>
+        <span class="badge">🧠 3 Движка</span>
+    </div>
 </header>
 
-<nav class="topnav glass">
-    <button class="nav-btn active" data-target="generate">📝 Генерация</button>
-    <button class="nav-btn" data-target="restore">🔨 Реставрация</button>
-    <button class="nav-btn" data-target="gallery">🖼️ Галерея</button>
-    <button class="nav-btn" data-target="learning">🧠 Аналитика</button>
-    <button class="nav-btn" data-target="about">ℹ️ О проекте</button>
+<nav class="topnav">
+    <a class="nav-btn active" href="#generate" data-page="generate">📝 Генерация</a>
+    <a class="nav-btn" href="#restore" data-page="restore">🔨 Реставратор</a>
+    <a class="nav-btn" href="#gallery" data-page="gallery">🖼️ Галерея</a>
+    <a class="nav-btn" href="#learning" data-page="learning">🧠 Обучение</a>
+    <a class="nav-btn" href="#about" data-page="about">ℹ️ О проекте</a>
 </nav>
 
-<main class="container" id="app-content"></main>
+<main class="container" id="main-content">
+    <!-- Контент рендерится через JS с плавной анимацией -->
+</main>
 
-<footer class="footer glass">
+<footer class="footer">
     <div class="footer-grid">
-        <div class="footer-col"><h4>Реставратор фасадов</h4><p>v3.2 Full Edition. Локальная обработка + Облачный AI.</p></div>
-        <div class="footer-col stats-col">
-            <p>Генераций: <span id="f-gens">0</span> | Точность: <span id="f-acc">0%</span></p>
-        </div>
-        <!-- СКРЫТЫЙ ЧАЙНИК -->
-        <div class="footer-col secret-zone">
-            <span id="secret-teapot-trigger" title="...">.</span>
+        <div class="footer-col"><h4>🏛️ Реставратор фасадов</h4><p>JS-сервер с ИИ для архитектуры.</p></div>
+        <div class="footer-col"><h4>Статистика</h4>
+            <p>Генераций: <span id="stat-gens">0</span> · 👍 <span id="stat-likes">0</span> · 👎 <span id="stat-dislikes">0</span></p>
+            <p>Точность: <span id="stat-acc">0</span>%</p></div>
+        <div class="footer-col"><h4>Датасет</h4><p>Стилей: 40</p><p>Примеров: ∞</p></div>
+        <div class="footer-col"><h4>Технологии</h4><p>Pure JS · Pollinations · Horde</p>
+            <!-- СКРЫТАЯ ПАСХАЛКА ЧАЙНИКА (как в оригинале) -->
+            <a class="teapot-link" href="#" id="teapot-link" title="...">🫖</a>
         </div>
     </div>
-    <div class="footer-bottom">&copy; 2026 Реставратор фасадов JS</div>
+    <div class="footer-bottom"><p>© 2026 Реставратор фасадов · 🪙 hamstercoin · 🍵 пакетики</p></div>
 </footer>
 
 <script src="script.js"></script>
 </body>
-    </html>
+                                                                                                                                    </html>
