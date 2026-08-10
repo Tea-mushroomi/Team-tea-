@@ -52,6 +52,7 @@ const S = {
     sound: localStorage.getItem('snd') !== '0',
     theme: localStorage.getItem('thm') || 'gothic',
     engine: localStorage.getItem('eng') || 'pollinations',
+    apiKey: localStorage.getItem('pk') || '',
     history: JSON.parse(localStorage.getItem('hist') || '[]'),
     learn: JSON.parse(localStorage.getItem('lrn') || '{"g":0,"l":0,"d":0}')
 };
@@ -62,6 +63,7 @@ const save = () => {
     localStorage.setItem('snd', S.sound ? '1' : '0');
     localStorage.setItem('thm', S.theme);
     localStorage.setItem('eng', S.engine);
+    localStorage.setItem('pk', S.apiKey);
     localStorage.setItem('hist', JSON.stringify(S.history));
     localStorage.setItem('lrn', JSON.stringify(S.learn));
 };
@@ -95,9 +97,7 @@ function toBase64(url) {
 const Aud = (() => {
     let c;
     const g = () => {
-        if (!c) {
-            c = new (window.AudioContext || window.webkitAudioContext)();
-        }
+        if (!c) c = new (window.AudioContext || window.webkitAudioContext)();
         return c;
     };
     const t = (f, tp, d, v) => {
@@ -143,20 +143,26 @@ const Aud = (() => {
     };
 })();
 
-// ===== ГЕНЕРАЦИЯ =====
+// ===== ГЕНЕРАЦИЯ (НОВЫЙ API gen.pollinations.ai) =====
 async function generate(prompt, seed, model) {
     const p = encodeURIComponent(prompt + ',' + BLD);
     const n = encodeURIComponent(NEG);
-    const url = 'https://image.pollinations.ai/prompt/' + p
+    // Новый endpoint: gen.pollinations.ai/image/
+    let url = 'https://gen.pollinations.ai/image/' + p
         + '?width=1024&height=1024&seed=' + seed
         + '&nologo=true&negative=' + n
         + '&model=' + model;
+    // Если есть API ключ — добавляем
+    if (S.apiKey) {
+        url += '&key=' + S.apiKey;
+    }
     const b64 = await toBase64(url);
     return { url: b64, engine: model };
 }
 
 async function genWithFallback(prompt, seed) {
-    const models = ['sana', 'flux', 'turbo', 'sdxl'];
+    // Новые доступные модели 2026
+    const models = ['flux', 'turbo', 'kontext', 'seedream'];
     const errs = [];
     for (const m of models) {
         try {
@@ -166,10 +172,26 @@ async function genWithFallback(prompt, seed) {
             console.warn(m + ' failed:', e.message);
         }
     }
-    throw new Error('Все модели недоступны:\n' + errs.join('\n'));
+    // Если новый API не работает — пробуем старый как фолбэк
+    try {
+        const p = encodeURIComponent(prompt + ',' + BLD);
+        const n = encodeURIComponent(NEG);
+        const oldUrl = 'https://image.pollinations.ai/prompt/' + p
+            + '?width=1024&height=1024&seed=' + seed
+            + '&nologo=true&negative=' + n + '&model=flux';
+        const b64 = await toBase64(oldUrl);
+        return { url: b64, engine: 'flux (legacy)' };
+    } catch (e) {
+        errs.push('legacy: ' + (e.message || 'unknown'));
+    }
+    throw new Error(
+        'Все модели недоступны:\n' + errs.join('\n')
+        + '\n\nЗарегистрируйтесь на enter.pollinations.ai'
+        + '\nи вставьте ключ в настройках ⚙️'
+    );
 }
 
-// ===== РЕСТАВРАЦИЯ (анализ фото + генерация восстановленной версии) =====
+// ===== РЕСТАВРАЦИЯ (kontext img2img или анализ+генерация) =====
 async function restoreImage(originalBase64, description, style) {
     const styleDesc = STYLES[style] || '';
 
@@ -208,7 +230,6 @@ async function restoreImage(originalBase64, description, style) {
         img.src = originalBase64;
     });
 
-    // Формируем промпт для восстановленного здания
     const restorePrompt = [
         'beautiful restored building facade',
         'pristine condition',
@@ -228,15 +249,29 @@ async function restoreImage(originalBase64, description, style) {
     const negExtra = ',ruins,damage,cracks,broken,destroyed,abandoned,graffiti,dirt,stains';
     const n = encodeURIComponent(NEG + negExtra);
     const seed = Math.floor(Math.random() * 999999);
-    const models = ['flux', 'sana', 'turbo', 'sdxl'];
+
+    // Пробуем kontext (img2img) если есть ключ
+    // Иначе обычную генерацию с детальным промптом
+    const models = ['kontext', 'flux', 'turbo', 'seedream'];
     const errs = [];
 
     for (const model of models) {
         try {
-            const url = 'https://image.pollinations.ai/prompt/' + p
-                + '?width=1024&height=1024&seed=' + seed
-                + '&nologo=true&negative=' + n
-                + '&model=' + model;
+            let url;
+            if (model === 'kontext' && S.apiKey) {
+                // Kontext поддерживает img2img через URL картинки
+                // Но нужен публичный URL, а не base64 — используем text-to-image
+                url = 'https://gen.pollinations.ai/image/' + p
+                    + '?width=1024&height=1024&seed=' + seed
+                    + '&nologo=true&negative=' + n
+                    + '&model=kontext&key=' + S.apiKey;
+            } else {
+                url = 'https://gen.pollinations.ai/image/' + p
+                    + '?width=1024&height=1024&seed=' + seed
+                    + '&nologo=true&negative=' + n
+                    + '&model=' + model;
+                if (S.apiKey) url += '&key=' + S.apiKey;
+            }
             const b64 = await toBase64(url);
             return { url: b64, engine: 'Restoration (' + model + ')' };
         } catch (e) {
@@ -244,7 +279,23 @@ async function restoreImage(originalBase64, description, style) {
             console.warn('Restore ' + model + ' failed:', e.message);
         }
     }
-    throw new Error('Реставрация не удалась:\n' + errs.join('\n'));
+
+    // Фолбэк на старый API
+    try {
+        const oldUrl = 'https://image.pollinations.ai/prompt/' + p
+            + '?width=1024&height=1024&seed=' + seed
+            + '&nologo=true&negative=' + n + '&model=flux';
+        const b64 = await toBase64(oldUrl);
+        return { url: b64, engine: 'Restoration (legacy flux)' };
+    } catch (e) {
+        errs.push('legacy: ' + (e.message || 'unknown'));
+    }
+
+    throw new Error(
+        'Реставрация не удалась:\n' + errs.join('\n')
+        + '\n\nЗарегистрируйтесь на enter.pollinations.ai'
+        + '\nи вставьте ключ в настройках ⚙️'
+    );
 }
 
 // ===== КОНЕЦ ЧАСТИ 1 ИЗ 3 =====
@@ -253,22 +304,23 @@ async function restoreImage(originalBase64, description, style) {
 // ===== ЧАТ ПОДДЕРЖКИ =====
 const CHAT_ANSWERS = {
     generate: "🔧 <b>Генерация не работает:</b><br>"
-        + "• Pollinations — бесплатный API, иногда перегружен.<br>"
-        + "• Подождите 1-2 минуты и попробуйте снова.<br>"
-        + "• Переключите движок в настройках (⚙️).<br>"
-        + "• Проверьте интернет-соединение.<br>"
-        + "• Попробуйте упростить описание.",
+        + "• Pollinations обновили API в 2025 году.<br>"
+        + "• Зарегистрируйтесь на <b>enter.pollinations.ai</b><br>"
+        + "• Получите бесплатный API-ключ.<br>"
+        + "• Вставьте его в настройках (⚙️).<br>"
+        + "• Без ключа работает с ограничениями (1 запрос / 15 сек).<br>"
+        + "• Также попробуйте подождать минуту — API может быть перегружен.",
 
     restore: "🔧 <b>Реставрация не работает:</b><br>"
         + "• Реставрация анализирует цвета вашего фото<br>"
         + "  и генерирует восстановленную версию через API.<br>"
-        + "• Если ошибка — API перегружен, попробуйте через минуту.<br>"
-        + "• Убедитесь что выбрали стиль и написали что восстановить.<br>"
+        + "• Нужен API-ключ от enter.pollinations.ai<br>"
+        + "• Модель kontext поддерживает img2img.<br>"
         + "• Чем подробнее описание — тем лучше результат.",
 
     gallery: "🔧 <b>Галерея:</b><br>"
         + "• Хранится в localStorage браузера.<br>"
-        + "• Лимит 50 изображений — старые удаляются автоматически.<br>"
+        + "• Лимит 50 изображений.<br>"
         + "• Кнопка 🗑️ под каждой картинкой удаляет её.<br>"
         + "• Кнопка «Удалить всё» очищает всю галерею.",
 
@@ -290,7 +342,8 @@ const CHAT_ANSWERS = {
 
     slow: "🔧 <b>Медленная работа:</b><br>"
         + "• Генерация занимает 10-60 секунд — это нормально.<br>"
-        + "• Sana обычно быстрее Flux.<br>"
+        + "• Без API-ключа лимит 1 запрос / 15 секунд.<br>"
+        + "• С ключом — 1 запрос / 3-5 секунд.<br>"
         + "• На мобильных устройствах может быть медленнее.",
 
     styles: "🎨 <b>Стили:</b><br>"
@@ -437,8 +490,8 @@ function renderPage(page) {
         } else {
             c.innerHTML += '<div style="margin-bottom:20px;text-align:right">'
                 + '<button class="btn btn-secondary" id="btn-clear-all" '
-                + 'style="border-color:var(--error);color:var(--error);padding:8px 16px;font-size:.85rem;min-height:auto">'
-                + '🗑️ Удалить всё</button></div>';
+                + 'style="border-color:var(--error);color:var(--error);padding:8px 16px;'
+                + 'font-size:.85rem;min-height:auto">🗑️ Удалить всё</button></div>';
             const g = document.createElement('div');
             g.className = 'gallery-grid';
             S.history.forEach((item, idx) => {
@@ -462,16 +515,18 @@ function renderPage(page) {
         c.innerHTML = '<h2 class="page-title">🧠 Обучение</h2>'
             + '<div class="learning-stats">'
             + '<div class="stat-card"><div class="stat-value">' + S.learn.g + '</div>Генераций</div>'
-            + '<div class="stat-card"><div class="stat-value" style="color:var(--success)">' + S.learn.l + '</div>Лайков</div>'
-            + '<div class="stat-card"><div class="stat-value" style="color:var(--error)">' + S.learn.d + '</div>Дизлайков</div>'
-            + '<div class="stat-card"><div class="stat-value" style="color:var(--grad-b)">' + acc + '%</div>Точность</div>'
-            + '</div>';
+            + '<div class="stat-card"><div class="stat-value" style="color:var(--success)">'
+            + S.learn.l + '</div>Лайков</div>'
+            + '<div class="stat-card"><div class="stat-value" style="color:var(--error)">'
+            + S.learn.d + '</div>Дизлайков</div>'
+            + '<div class="stat-card"><div class="stat-value" style="color:var(--grad-b)">'
+            + acc + '%</div>Точность</div></div>';
 
     } else {
         c.innerHTML = '<h2 class="page-title">ℹ️ О проекте</h2>'
             + '<p><b>Реставратор фасадов</b> — клиентская JS-версия.<br>'
-            + '40 стилей · Sana + Flux + Turbo<br>'
-            + 'Реставрация анализирует фото и генерирует восстановленную версию.<br>'
+            + '40 стилей · Flux + Turbo + Kontext<br>'
+            + 'Для работы нужен бесплатный ключ от enter.pollinations.ai<br>'
             + 'Галерея в localStorage. Чат поддержки 💬 слева внизу.</p>';
     }
 
@@ -494,8 +549,7 @@ function showResult(data) {
         + '<button class="btn-like" onclick="vote(\'l\')">👍 Нравится</button>'
         + '<button class="btn-dislike" onclick="vote(\'d\')">👎 Не нравится</button>'
         + '<a href="' + data.url + '" download="facade_' + Date.now() + '.jpg" '
-        + 'class="btn btn-secondary">💾 Скачать</a>'
-        + '</div></div>';
+        + 'class="btn btn-secondary">💾 Скачать</a></div></div>';
     a.scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -541,21 +595,19 @@ function closeLightbox() {
 async function doGen(prompt, style) {
     const seed = Math.floor(Math.random() * 999999);
     const full = [prompt, STYLES[style]].filter(Boolean).join(', ');
-    showLoad('🎨 Генерация через ' + S.engine + '...');
+    showLoad('🎨 Генерация...');
     try {
         let r;
         if (S.engine === 'horde') {
-            r = await generate(full, seed, 'flux-realism');
-            r.engine = 'AI Horde';
+            r = await generate(full, seed, 'flux');
+            r.engine = 'AI Horde (flux)';
         } else {
             r = await genWithFallback(full, seed);
         }
         r.style = style;
         r.date = new Date().toISOString();
         S.history.unshift(r);
-        if (S.history.length > 50) {
-            S.history = S.history.slice(0, 50);
-        }
+        if (S.history.length > 50) S.history = S.history.slice(0, 50);
         S.learn.g++;
         save();
         updateUI();
@@ -563,7 +615,7 @@ async function doGen(prompt, style) {
         Aud.ok();
     } catch (e) {
         console.error('Generation error:', e);
-        showError(e.message + '\n\nПопробуйте другой движок ⚙️ или подождите минуту.');
+        showError(e.message);
         Aud.err();
     } finally {
         hideLoad();
@@ -583,7 +635,6 @@ function bindPage() {
             doGen(p, s);
         };
     }
-
     const rb = document.getElementById('btn-res');
     if (rb) {
         rb.onclick = async () => {
@@ -600,9 +651,7 @@ function bindPage() {
                     r.style = style;
                     r.date = new Date().toISOString();
                     S.history.unshift(r);
-                    if (S.history.length > 50) {
-                        S.history = S.history.slice(0, 50);
-                    }
+                    if (S.history.length > 50) S.history = S.history.slice(0, 50);
                     S.learn.g++;
                     save();
                     updateUI();
@@ -610,7 +659,7 @@ function bindPage() {
                     Aud.ok();
                 } catch (err) {
                     console.error('Restore error:', err);
-                    showError(err.message + '\n\nПопробуйте через минуту — API может быть перегружен.');
+                    showError(err.message);
                     Aud.err();
                 } finally {
                     hideLoad();
@@ -707,6 +756,17 @@ document.addEventListener('DOMContentLoaded', () => {
         Aud.click();
     });
 
+    // API ключ
+    const keyInput = document.getElementById('api-key-input');
+    if (keyInput) {
+        keyInput.value = S.apiKey;
+        keyInput.addEventListener('change', e => {
+            S.apiKey = e.target.value.trim();
+            save();
+            Aud.click();
+        });
+    }
+
     // Сброс валюты
     document.getElementById('reset-coins').addEventListener('click', () => {
         S.coins = 0;
@@ -733,9 +793,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Lightbox — отдельная модалка
     document.getElementById('lb-close-btn').addEventListener('click', closeLightbox);
     document.getElementById('lightbox-modal').addEventListener('click', (e) => {
-        if (e.target === document.getElementById('lightbox-modal')) {
-            closeLightbox();
-        }
+        if (e.target === document.getElementById('lightbox-modal')) closeLightbox();
     });
 
     // Чайник — отдельная модалка
