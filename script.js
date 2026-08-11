@@ -1,6 +1,6 @@
 // =============================================
 // РЕСТАВРАТОР ФАСАДОВ — script.js (часть 1 из 2)
-// Исправлено: без nologo, защита от отсутствующих элементов
+// Гонка моделей + разнообразие + выбор разрешения
 // =============================================
 
 var STYLES = {
@@ -47,15 +47,35 @@ var STYLES = {
 };
 
 var NEGATIVE_PROMPT = "people,humans,crowd,faces,animals,blurry,low quality,deformed,watermark,text";
-var BUILDING_BOOST = "architecture only,building exterior,facade,no people,no interior,photorealistic,8k";
+var BUILDING_BOOST = "architecture only,building exterior,facade,no people,no interior,8k";
+
+// ===== ГЕНЕРАТОР РАЗНООБРАЗИЯ =====
+var DIV_TIME = ['golden hour light', 'soft morning light', 'harsh noon sun', 'blue hour dusk', 'night with warm window lights', 'overcast diffused light'];
+var DIV_WEATHER = ['clear sky', 'light fog', 'after rain wet pavement', 'snow falling', 'dramatic clouds', 'spring bloom'];
+var DIV_ANGLE = ['street level view', 'low angle looking up', 'aerial drone view', 'corner perspective', 'straight-on facade view', 'close-up detail view'];
+var DIV_MOOD = ['cozy atmosphere', 'majestic monumental', 'quiet serene mood', 'lively urban scene', 'dramatic contrast', 'nostalgic vintage feel'];
+var DIV_DETAIL = ['with birds on the roof', 'with old street lamps', 'with climbing ivy', 'with balconies full of flowers', 'with visible brick texture', 'with ornate entrance door', 'with cats on the windowsill'];
+var DIV_RENDER = ['photorealistic photo', 'detailed architectural photography', 'realistic cinematic shot', 'professional real estate photo'];
+
+function pickRandom(arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function addDiversity(prompt) {
+    var extras = [pickRandom(DIV_TIME), pickRandom(DIV_WEATHER), pickRandom(DIV_ANGLE), pickRandom(DIV_MOOD), pickRandom(DIV_RENDER)];
+    if (Math.random() < 0.6) extras.push(pickRandom(DIV_DETAIL));
+    return prompt + ', ' + extras.join(', ') + ', unique composition';
+}
 
 var STATE = {
     coins: parseInt(localStorage.getItem('hc')) || 0,
     tea: parseInt(localStorage.getItem('tb')) || 0,
     soundEnabled: localStorage.getItem('snd') !== '0',
+    fastMode: localStorage.getItem('fst') !== '0',
     theme: localStorage.getItem('thm') || 'gothic',
     design: localStorage.getItem('dsg') || 'classic',
-    selectedModel: localStorage.getItem('mdl') || 'horde',
+    selectedModel: localStorage.getItem('mdl') || 'turbo',
+    resolution: localStorage.getItem('res') || '768',
     history: JSON.parse(localStorage.getItem('hist') || '[]'),
     learning: JSON.parse(localStorage.getItem('lrn') || '{"generations":0,"likes":0,"dislikes":0}')
 };
@@ -64,21 +84,53 @@ function saveState() {
     localStorage.setItem('hc', STATE.coins);
     localStorage.setItem('tb', STATE.tea);
     localStorage.setItem('snd', STATE.soundEnabled ? '1' : '0');
+    localStorage.setItem('fst', STATE.fastMode ? '1' : '0');
     localStorage.setItem('thm', STATE.theme);
     localStorage.setItem('dsg', STATE.design);
     localStorage.setItem('mdl', STATE.selectedModel);
+    localStorage.setItem('res', STATE.resolution);
     localStorage.setItem('hist', JSON.stringify(STATE.history));
     localStorage.setItem('lrn', JSON.stringify(STATE.learning));
 }
 
-// Безопасный доступ к элементам (не крашится если элемента нет)
 function on(id, evt, fn) {
     var el = document.getElementById(id);
     if (el) el.addEventListener(evt, fn);
     return el;
 }
 
-// ===== УТИЛИТЫ КОНВЕРТАЦИИ =====
+// ===== СВОЯ КАРТИНКА ЧАЙНИКА =====
+var teapotCustomUrl = null;
+['teapot.png', 'teapot.jpg', 'teapot.gif', 'teapot.webp'].forEach(function(name) {
+    var t = new Image();
+    t.onload = function() { if (!teapotCustomUrl) teapotCustomUrl = name; };
+    t.src = name;
+});
+
+// ===== ТАЙМЕР И КУЛДАУН =====
+var loadTimerId = null;
+var loadStart = 0;
+var cooldownRemaining = 0;
+var lastApiCall = 0;
+
+function sleep(ms) {
+    return new Promise(function(r) { setTimeout(r, ms); });
+}
+
+async function waitCooldown() {
+    var wait = 15000 - (Date.now() - lastApiCall);
+    if (wait > 0) {
+        cooldownRemaining = wait;
+        while (cooldownRemaining > 0) {
+            await sleep(500);
+            cooldownRemaining = 15000 - (Date.now() - lastApiCall);
+        }
+        cooldownRemaining = 0;
+    }
+    lastApiCall = Date.now();
+}
+
+// ===== УТИЛИТЫ =====
 function blobToDataUrl(blob) {
     return new Promise(function(resolve, reject) {
         var reader = new FileReader();
@@ -100,8 +152,7 @@ function downscale(dataUrl, maxSize) {
                 h = Math.round(h * r);
             }
             var c = document.createElement('canvas');
-            c.width = w;
-            c.height = h;
+            c.width = w; c.height = h;
             c.getContext('2d').drawImage(img, 0, 0, w, h);
             resolve(c.toDataURL('image/jpeg', 0.7));
         };
@@ -110,14 +161,14 @@ function downscale(dataUrl, maxSize) {
     });
 }
 
-// ===== POLLINATIONS (БЕЗ nologo — он требует аккаунт!) =====
+// ===== POLLINATIONS (разрешение выбирает пользователь) =====
 function buildImageUrl(prompt, modelName) {
     var fullPrompt = prompt + ', ' + BUILDING_BOOST;
     var encodedPrompt = encodeURIComponent(fullPrompt);
     var encodedNegative = encodeURIComponent(NEGATIVE_PROMPT);
-    var seed = Math.floor(Math.random() * 999999);
+    var seed = Math.floor(Math.random() * 9999999);
     return 'https://image.pollinations.ai/prompt/' + encodedPrompt
-        + '?width=1024&height=1024&seed=' + seed
+        + '?width=' + STATE.resolution + '&height=' + STATE.resolution + '&seed=' + seed
         + '&negative=' + encodedNegative
         + '&model=' + modelName;
 }
@@ -127,8 +178,8 @@ function waitForImageLoad(url) {
         var img = new Image();
         var timeoutId = setTimeout(function() {
             img.src = '';
-            reject(new Error('Таймаут 180 секунд'));
-        }, 180000);
+            reject(new Error('Таймаут 90 секунд'));
+        }, 90000);
         img.onload = function() {
             clearTimeout(timeoutId);
             if (img.naturalWidth > 0 && img.naturalHeight > 0) resolve();
@@ -144,7 +195,6 @@ function waitForImageLoad(url) {
 
 async function generateViaPollinations(prompt, model) {
     var url = buildImageUrl(prompt, model);
-    // Сначала fetch — даёт реальный статус ошибки и base64 для хранения
     try {
         var res = await fetch(url);
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -154,7 +204,6 @@ async function generateViaPollinations(prompt, model) {
         var small = await downscale(dataUrl, 800);
         return { url: small, engine: model };
     } catch (fetchError) {
-        // Если fetch заблокирован — пробуем обычный <img>
         await waitForImageLoad(url);
         return { url: url, engine: model };
     }
@@ -168,7 +217,7 @@ async function generateViaHorde(prompt) {
         headers: { 'Content-Type': 'application/json', 'apikey': '0000000000' },
         body: JSON.stringify({
             prompt: fullPrompt,
-            params: { width: 512, height: 512, steps: 20, n: 1 },
+            params: { width: 512, height: 512, steps: 12, n: 1 },
             models: ['stable_diffusion_2.1'],
             nsfw: false
         })
@@ -177,9 +226,8 @@ async function generateViaHorde(prompt) {
     var postData = await postResponse.json();
     var jobId = postData.id;
     if (!jobId) throw new Error('Horde: нет id задачи');
-
-    for (var attempt = 0; attempt < 60; attempt++) {
-        await new Promise(function(r) { setTimeout(r, 3000); });
+    for (var attempt = 0; attempt < 40; attempt++) {
+        await sleep(3000);
         var checkResponse = await fetch('https://aihorde.net/api/v2/generate/check/' + jobId);
         var checkData = await checkResponse.json();
         if (checkData.faulted) throw new Error('Horde: задача сломалась');
@@ -195,41 +243,59 @@ async function generateViaHorde(prompt) {
     throw new Error('Horde: таймаут');
 }
 
-// ===== ОБЩАЯ ГЕНЕРАЦИЯ С ФОЛБЭКОМ =====
-async function generateWithFallback(prompt, preferHorde) {
-    var modelsToTry;
-    if (preferHorde) {
-        modelsToTry = ['horde', STATE.selectedModel, 'sana', 'flux', 'turbo'];
-    } else {
-        modelsToTry = [STATE.selectedModel, 'horde', 'sana', 'flux', 'turbo'];
-    }
-    var uniqueModels = [];
-    var i;
-    for (i = 0; i < modelsToTry.length; i++) {
-        if (uniqueModels.indexOf(modelsToTry[i]) === -1) uniqueModels.push(modelsToTry[i]);
-    }
+// ===== ПАРАЛЛЕЛЬНАЯ ГОНКА МОДЕЛЕЙ =====
+function raceModels(prompt, models) {
+    return new Promise(function(resolve, reject) {
+        var pending = models.length;
+        var errors = [];
+        var settled = false;
+        models.forEach(function(model) {
+            generateViaPollinations(prompt, model)
+                .then(function(result) {
+                    if (!settled) { settled = true; resolve(result); }
+                })
+                .catch(function(e) {
+                    errors.push(model + ': ' + (e.message || 'ошибка'));
+                    pending--;
+                    if (pending === 0 && !settled) {
+                        settled = true;
+                        reject(new Error(errors.join('\n')));
+                    }
+                });
+        });
+    });
+}
+
+// ===== УМНАЯ ГЕНЕРАЦИЯ =====
+async function smartGenerate(prompt, preferHorde) {
+    await waitCooldown();
+    var diverse = addDiversity(prompt);
     var errors = [];
-    for (i = 0; i < uniqueModels.length; i++) {
-        var model = uniqueModels[i];
-        try {
-            if (model === 'horde') return await generateViaHorde(prompt);
-            return await generateViaPollinations(prompt, model);
-        } catch (error) {
-            errors.push(model + ': ' + (error.message || 'ошибка'));
-            console.warn('Модель ' + model + ' не сработала:', error.message);
-        }
+
+    if (STATE.selectedModel === 'horde' && !STATE.fastMode) {
+        try { return await generateViaHorde(diverse); }
+        catch (e) { errors.push('horde: ' + e.message); }
     }
+
+    try {
+        return await raceModels(diverse, ['turbo', 'flux', 'sana']);
+    } catch (e) {
+        errors.push(e.message);
+    }
+
+    try { return await generateViaHorde(diverse); }
+    catch (e) { errors.push('horde: ' + e.message); }
+
     throw new Error('Все модели недоступны:\n' + errors.join('\n') + '\n\nПодождите 15 секунд и попробуйте снова.');
 }
 
-// ===== РЕСТАВРАЦИЯ (horde по умолчанию) =====
+// ===== РЕСТАВРАЦИЯ =====
 function analyzeImage(base64Data) {
     return new Promise(function(resolve) {
         var img = new Image();
         img.onload = function() {
             var canvas = document.createElement('canvas');
-            canvas.width = 32;
-            canvas.height = 32;
+            canvas.width = 32; canvas.height = 32;
             var ctx = canvas.getContext('2d');
             ctx.drawImage(img, 0, 0, 32, 32);
             var pixels = ctx.getImageData(0, 0, 32, 32).data;
@@ -268,7 +334,7 @@ async function restoreBuilding(originalBase64, description, styleName) {
     for (var i = 0; i < parts.length; i++) {
         if (parts[i] && parts[i].length > 0) filtered.push(parts[i]);
     }
-    return await generateWithFallback(filtered.join(', '), true);
+    return await smartGenerate(filtered.join(', '), true);
 }
 
 // ===== ЗВУК =====
@@ -281,9 +347,7 @@ var AudioEngine = (function() {
     function playTone(freq, type, duration, volume) {
         if (!STATE.soundEnabled) return;
         try {
-            var c = getCtx();
-            var osc = c.createOscillator();
-            var gain = c.createGain();
+            var c = getCtx(), osc = c.createOscillator(), gain = c.createGain();
             osc.type = type;
             osc.frequency.setValueAtTime(freq, c.currentTime);
             gain.gain.setValueAtTime(volume || 0.1, c.currentTime);
@@ -314,24 +378,23 @@ var AudioEngine = (function() {
 
 // ===== ЧАТ ПОДДЕРЖКИ =====
 var CHAT_RESPONSES = {
-    generate: "🔧 <b>Генерация:</b><br>• 4 движка: Horde, Sana, Flux, Turbo<br>• Если один упал — пробуется следующий<br>• Лимит: 1 запрос / 15 сек<br>• Генерация: 10-180 секунд",
-    restore: "🔧 <b>Реставрация:</b><br>• По умолчанию через <b>Horde</b><br>• Анализирует цвета фото<br>• Генерирует восстановленную версию",
-    gallery: "🔧 <b>Галерея:</b><br>• Хранится в localStorage<br>• Лимит 50 изображений<br>• 🗑️ под картинкой — удалить одну",
-    footer: "🔧 <b>Подвал:</b><br>• Просмотр картинок — отдельная модалка<br>• Не ломает подвал",
-    hamster: "🐹 Появляется во время генерации. Тапайте для монет 🪙",
-    teapot: "🫖 Секретная пасхалка! Ищите 🫖 в подвале сайта.",
-    slow: "🔧 Horde — до 3 минут. Turbo — самая быстрая. Переключите в ⚙️",
-    styles: "🎨 40 стилей от Хрущёвки до Киберпанка.",
-    design: "🎨 5 вариаций дизайна в настройках ⚙️"
+    generate: "🔧 <b>Генерация:</b><br>• 3 модели стартуют ОДНОВРЕМЕННО<br>• Результат — как только первая готова<br>• Пауза 15 сек между запросами (лимит API)",
+    restore: "🔧 <b>Реставрация:</b><br>• Анализирует цвета фото<br>• Генерирует восстановленную версию<br>• Каждый раз разная (случайные свет/ракурс)",
+    slow: "⚡ <b>Скорость:</b><br>• Гонка моделей: turbo+flux+sana параллельно<br>• Выбери разрешение 640 — быстрее<br>• «Отдых API» — защита от блокировок",
+    diverse: "🎲 <b>Разнообразие:</b><br>• Каждый запрос получает случайные:<br>— время суток и погоду<br>— ракурс камеры<br>— настроение и детали<br>• Одинаковых картинок не бывает!",
+    gallery: "🔧 <b>Галерея:</b><br>• Хранится в localStorage<br>• 🗑️ под картинкой — удалить одну",
+    teapot: "🫖 <b>Своя картинка чайника:</b><br>• Положи teapot.png рядом с index.html<br>• Сайт подхватит его автоматически",
+    emoji: "🔧 <b>Стикеры на ПК:</b><br>• Подключён Noto Color Emoji<br>• Если ч/б — нажми Ctrl+F5<br>• Или замени эмодзи на свои PNG (см. О проекте)",
+    design: "🎭 <b>6 тем + 8 дизайнов + 3 разрешения</b> в настройках ⚙️ — комбинируй!"
 };
 
 function handleChatQuestion(key) {
     var msgs = document.getElementById('chat-messages');
     if (!msgs) return;
     var labels = {
-        generate: 'Не генерирует', restore: 'Не реставрирует', gallery: 'Галерея',
-        footer: 'Подвал', hamster: 'Хомяк', teapot: 'Чайник',
-        slow: 'Медленно', styles: 'Стили', design: 'Дизайн'
+        generate: 'Не генерирует', restore: 'Не реставрирует', slow: 'Долго ждать',
+        diverse: 'Похожие картинки', gallery: 'Галерея', teapot: 'Картинка чайника',
+        emoji: 'Стикеры на ПК', design: 'Темы и дизайны'
     };
     var userMsg = document.createElement('div');
     userMsg.className = 'chat-msg user';
@@ -386,9 +449,22 @@ function showLoading(msg) {
     if (el) el.textContent = msg;
     var ov = document.getElementById('loading-overlay');
     if (ov) ov.classList.add('active');
+    loadStart = Date.now();
+    clearInterval(loadTimerId);
+    loadTimerId = setInterval(function() {
+        var t = document.getElementById('loading-timer');
+        if (t) {
+            if (cooldownRemaining > 0) {
+                t.textContent = '⏳ Отдых API: ' + Math.ceil(cooldownRemaining / 1000) + ' сек';
+            } else {
+                t.textContent = '⏱ ' + Math.round((Date.now() - loadStart) / 1000) + ' сек';
+            }
+        }
+    }, 500);
 }
 
 function hideLoading() {
+    clearInterval(loadTimerId);
     var ov = document.getElementById('loading-overlay');
     if (ov) ov.classList.remove('active');
 }
@@ -434,10 +510,10 @@ function renderPage(page) {
             + '<div class="form-group full-width"><label>Описание</label><textarea id="gp" placeholder="Опишите здание подробно..."></textarea></div>'
             + '<div class="form-group"><label>Стиль (' + styleKeys.length + ')</label><select id="gs">' + opts + '</select></div>'
             + '<div class="form-group"><label>Seed</label><input type="number" id="gseed" placeholder="Случайно"></div>'
-            + '</div><button class="btn gothic-btn" id="btn-gen">✨ Создать проект</button><div id="res-area"></div>';
+            + '</div><button class="btn gothic-btn" id="btn-gen">🎲 Создать проект</button><div id="res-area"></div>';
     } else if (page === 'restore') {
         card.innerHTML = '<h2 class="page-title">🔨 Реставрация фасада</h2>'
-            + '<p style="color:var(--text-muted);margin-bottom:20px">Загрузите фото разрушенного здания. ИИ (Horde по умолчанию) сгенерирует восстановленную версию.</p>'
+            + '<p style="color:var(--text-muted);margin-bottom:20px">Загрузите фото разрушенного здания. ИИ сгенерирует восстановленную версию — каждый раз разную.</p>'
             + '<div class="form-grid">'
             + '<div class="form-group full-width"><label>Фото здания</label><input type="file" id="rf" accept="image/*"></div>'
             + '<div class="form-group full-width"><label>Что восстановить?</label><textarea id="rp" placeholder="достроить крышу, восстановить окна..."></textarea></div>'
@@ -472,7 +548,7 @@ function renderPage(page) {
             + '<div class="stat-card"><div class="stat-value" style="color:var(--error)">' + STATE.learning.dislikes + '</div>Дизлайков</div>'
             + '<div class="stat-card"><div class="stat-value" style="color:var(--grad-b)">' + acc + '%</div>Точность</div></div>';
     } else {
-        card.innerHTML = '<h2 class="page-title">ℹ️ О проекте</h2><p><b>Реставратор фасадов</b> — клиентская JS-версия.<br>40 стилей · 4 движка: Horde + Sana + Flux + Turbo<br>5 вариаций дизайна в настройках ⚙️<br>Чат поддержки 💬 слева внизу.</p>';
+        card.innerHTML = '<h2 class="page-title">ℹ️ О проекте</h2><p><b>Реставратор фасадов</b> — клиентская JS-версия.<br>40 стилей · 4 движка · 6 тем · 8 дизайнов · 3 разрешения<br>🎲 Генератор разнообразия: каждый раз разные свет, ракурс, погода<br>🫖 Своя картинка чайника: teapot.png рядом с index.html<br>🖼 Свои иконки: замени эмодзи на PNG (Ctrl+H в редакторе)</p>';
     }
     main.appendChild(card);
     bindPageEvents();
@@ -505,8 +581,7 @@ function showError(msg) {
 function handleVote(type) {
     if (type === 'like') STATE.learning.likes++;
     else STATE.learning.dislikes++;
-    saveState();
-    updateUI();
+    saveState(); updateUI();
     var actions = document.querySelector('.result-actions');
     if (actions) actions.innerHTML = '<p style="color:var(--accent);font-weight:bold">Спасибо за оценку!</p>';
     AudioEngine.click();
@@ -534,9 +609,9 @@ async function performGeneration(prompt, styleName) {
     var parts = [prompt];
     if (STYLES[styleName] && STYLES[styleName].length > 0) parts.push(STYLES[styleName]);
     var fullPrompt = parts.join(', ');
-    showLoading('🎨 Генерация... (10-180 сек)');
+    showLoading('🎨 Генерация (гонка моделей)...');
     try {
-        var result = await generateWithFallback(fullPrompt, false);
+        var result = await smartGenerate(fullPrompt, false);
         result.style = styleName;
         result.date = new Date().toISOString();
         STATE.history.unshift(result);
@@ -570,7 +645,7 @@ function bindPageEvents() {
             var style = document.getElementById('rs').value;
             if (!fi.files || !fi.files[0]) return alert('Загрузите фото');
             if (!desc) return alert('Опишите что восстановить');
-            showLoading('🏗️ Реставрация через Horde... (до 3 минут)');
+            showLoading('🏗️ Реставрация (гонка моделей)...');
             var reader = new FileReader();
             reader.onload = async function(ev) {
                 try {
@@ -617,7 +692,7 @@ function bindGalleryEvents() {
     }
 }
 
-// ===== ИНИЦИАЛИЗАЦИЯ (безопасная) =====
+// ===== ИНИЦИАЛИЗАЦИЯ =====
 document.addEventListener('DOMContentLoaded', function() {
     setTheme(STATE.theme);
     setDesign(STATE.design);
@@ -649,9 +724,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (panel) panel.classList.toggle('open');
     });
     document.addEventListener('click', function(e) {
-        if (panel && !panel.contains(e.target) && e.target.id !== 'settings-btn') {
-            panel.classList.remove('open');
-        }
+        if (panel && !panel.contains(e.target) && e.target.id !== 'settings-btn') panel.classList.remove('open');
     });
 
     var themeBtns = document.querySelectorAll('.theme-btn');
@@ -662,29 +735,22 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    var snd = on('sound-on', 'change', function(e) {
-        STATE.soundEnabled = e.target.checked;
-        saveState();
-    });
-    if (snd) snd.checked = STATE.soundEnabled;
-
-    var mdl = on('model-select', 'change', function(e) {
-        STATE.selectedModel = e.target.value;
-        saveState();
-        AudioEngine.click();
-    });
-    if (mdl) mdl.value = STATE.selectedModel;
-
-    var dsg = on('design-select', 'change', function(e) {
-        setDesign(e.target.value);
-        AudioEngine.click();
-    });
+    var dsg = on('design-select', 'change', function(e) { setDesign(e.target.value); AudioEngine.click(); });
     if (dsg) dsg.value = STATE.design;
 
-    on('reset-coins', 'click', function() {
-        STATE.coins = 0; STATE.tea = 0;
-        saveState(); updateUI(); AudioEngine.click();
-    });
+    var rsz = on('res-select', 'change', function(e) { STATE.resolution = e.target.value; saveState(); AudioEngine.click(); });
+    if (rsz) rsz.value = STATE.resolution;
+
+    var mdl = on('model-select', 'change', function(e) { STATE.selectedModel = e.target.value; saveState(); AudioEngine.click(); });
+    if (mdl) mdl.value = STATE.selectedModel;
+
+    var fst = on('fast-mode', 'change', function(e) { STATE.fastMode = e.target.checked; saveState(); });
+    if (fst) fst.checked = STATE.fastMode;
+
+    var snd = on('sound-on', 'change', function(e) { STATE.soundEnabled = e.target.checked; saveState(); });
+    if (snd) snd.checked = STATE.soundEnabled;
+
+    on('reset-coins', 'click', function() { STATE.coins = 0; STATE.tea = 0; saveState(); updateUI(); AudioEngine.click(); });
 
     var ham = document.getElementById('hamster');
     if (ham) {
@@ -702,15 +768,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
     on('lb-close-btn', 'click', closeLightbox);
     var lbm = document.getElementById('lightbox-modal');
-    if (lbm) {
-        lbm.addEventListener('click', function(e) {
-            if (e.target === lbm) closeLightbox();
-        });
-    }
+    if (lbm) lbm.addEventListener('click', function(e) { if (e.target === lbm) closeLightbox(); });
 
     on('teapot-link', 'click', function(e) {
         e.preventDefault();
         var tm = document.getElementById('teapot-modal');
+        var ti = document.getElementById('teapot-img');
+        var te = document.getElementById('teapot-emoji');
+        if (teapotCustomUrl && ti) {
+            ti.src = teapotCustomUrl;
+            ti.style.display = 'block';
+            if (te) te.style.display = 'none';
+        }
         if (tm) tm.classList.add('active');
         STATE.tea++;
         saveState(); updateUI();
@@ -727,23 +796,15 @@ document.addEventListener('DOMContentLoaded', function() {
         e.stopPropagation();
         if (chatPanel) chatPanel.classList.toggle('open');
     });
-    on('chat-close', 'click', function() {
-        if (chatPanel) chatPanel.classList.remove('open');
-    });
+    on('chat-close', 'click', function() { if (chatPanel) chatPanel.classList.remove('open'); });
     document.addEventListener('click', function(e) {
-        if (chatPanel && !chatPanel.contains(e.target) && e.target.id !== 'chat-btn') {
-            chatPanel.classList.remove('open');
-        }
+        if (chatPanel && !chatPanel.contains(e.target) && e.target.id !== 'chat-btn') chatPanel.classList.remove('open');
     });
-    if (chatPanel) {
-        chatPanel.addEventListener('click', function(e) { e.stopPropagation(); });
-    }
+    if (chatPanel) chatPanel.addEventListener('click', function(e) { e.stopPropagation(); });
 
     var chatQs = document.querySelectorAll('.chat-q');
     for (var q = 0; q < chatQs.length; q++) {
-        chatQs[q].addEventListener('click', function() {
-            handleChatQuestion(this.dataset.q);
-        });
+        chatQs[q].addEventListener('click', function() { handleChatQuestion(this.dataset.q); });
     }
 });
 
