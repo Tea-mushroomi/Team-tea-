@@ -111,4 +111,36 @@ textarea{resize:vertical;min-height:90px}
 .chat-quick{padding:8px 12px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:4px}
 .chat-q{padding:4px 8px;font-size:.7rem;border:1px solid var(--border);border-radius:12px;background:var(--bg-input);color:var(--text-muted);cursor:pointer;font-family:var(--font);transition:var(--transition)}
 .chat-q:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ===== 5 ВАРИАЦИЙ ДИЗАЙНА (чтобы не выглядело как шаблон) ===== */
+body[data-design="brutal"]{--radius:0px;--radius-lg:0px;--font:'Courier New','Consolas',monospace;--shadow:5px 5px 0 rgba(0,0,0,.55)}
+body[data-design="brutal"] .gothic-arch{border-radius:0;border-width:3px;box-shadow:none}
+body[data-design="brutal"] .btn,body[data-design="brutal"] .nav-btn,body[data-design="brutal"] .btn-like,body[data-design="brutal"] .btn-dislike{border-radius:0}
+body[data-design="brutal"] .corner-badge,body[data-design="brutal"] .badge{border-radius:0}
+body[data-design="brutal"] .settings-btn,body[data-design="brutal"] .chat-btn{border-radius:0}
+body[data-design="brutal"] .card{border-width:2px}
+body[data-design="brutal"] .hamster-wheel .wheel{border-radius:0}
+body[data-design="brutal"] .hero h1{background:none;-webkit-text-fill-color:var(--accent);text-transform:uppercase;letter-spacing:2px}
+
+body[data-design="vintage"]{--font:'Palatino Linotype','Book Antiqua',Palatino,serif;--radius:6px;--radius-lg:10px}
+body[data-design="vintage"] .hero{background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,.04) 3px,rgba(0,0,0,.04) 4px),linear-gradient(135deg,var(--bg-elevated),var(--bg-card))}
+body[data-design="vintage"] .gothic-arch{border-radius:10px 10px 0 0;border-style:double;border-width:5px}
+body[data-design="vintage"] .card{border-style:dashed}
+body[data-design="vintage"] .subtitle{letter-spacing:1px}
+body[data-design="vintage"] .nav-btn{font-style:italic}
+
+body[data-design="neon"] .card{border:1px solid var(--accent);box-shadow:0 0 18px var(--accent-soft),inset 0 0 12px var(--accent-soft)}
+body[data-design="neon"] .gothic-arch{box-shadow:0 0 35px var(--accent-soft)}
+body[data-design="neon"] .gothic-btn{box-shadow:0 0 16px var(--accent-soft)}
+body[data-design="neon"] .topnav{box-shadow:0 2px 20px var(--accent-soft)}
+body[data-design="neon"] .corner-badge{box-shadow:0 0 14px var(--accent-soft)}
+body[data-design="neon"] .gallery-item:hover{box-shadow:0 0 25px var(--accent-soft)}
+
+body[data-design="soft"]{--radius:22px;--radius-lg:34px}
+body[data-design="soft"] .gothic-arch{border-radius:70px 70px 0 0/55px 55px 0 0}
+body[data-design="soft"] .btn,body[data-design="soft"] .nav-btn{border-radius:999px}
+body[data-design="soft"] .corner-badge{border-radius:999px}
+body[data-design="soft"] .btn-like,body[data-design="soft"] .btn-dislike{border-radius:999px}
+body[data-design="soft"] .chat-q{border-radius:999px}
+
 @media(max-width:768px){.form-grid{grid-template-columns:1fr}.gothic-arch{padding:15px 30px}.btn{width:100%}.footer-grid{grid-template-columns:1fr}.nav-btn{padding:8px 10px;font-size:.85rem}.chat-panel{width:calc(100vw - 36px);left:18px;right:18px}}
