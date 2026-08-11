@@ -1,6 +1,5 @@
 // =============================================
 // РЕСТАВРАТОР ФАСАДОВ — script.js (часть 1 из 2)
-// Гонка моделей + разнообразие + выбор разрешения
 // =============================================
 
 var STYLES = {
@@ -161,7 +160,7 @@ function downscale(dataUrl, maxSize) {
     });
 }
 
-// ===== POLLINATIONS (разрешение выбирает пользователь) =====
+// ===== POLLINATIONS =====
 function buildImageUrl(prompt, modelName) {
     var fullPrompt = prompt + ', ' + BUILDING_BOOST;
     var encodedPrompt = encodeURIComponent(fullPrompt);
@@ -209,7 +208,7 @@ async function generateViaPollinations(prompt, model) {
     }
 }
 
-// ===== AI HORDE =====
+// ===== AI HORDE (текст-в-картинку) =====
 async function generateViaHorde(prompt) {
     var fullPrompt = prompt + ', ' + BUILDING_BOOST;
     var postResponse = await fetch('https://aihorde.net/api/v2/generate/async', {
@@ -235,7 +234,8 @@ async function generateViaHorde(prompt) {
             var statusResponse = await fetch('https://aihorde.net/api/v2/generate/status/' + jobId);
             var statusData = await statusResponse.json();
             if (statusData.generations && statusData.generations.length > 0 && statusData.generations[0].img) {
-                return { url: statusData.generations[0].img, engine: 'horde' };
+                var stored = await urlToStored(statusData.generations[0].img);
+                return { url: stored, engine: 'horde' };
             }
             throw new Error('Horde: нет результата');
         }
@@ -289,7 +289,7 @@ async function smartGenerate(prompt, preferHorde) {
     throw new Error('Все модели недоступны:\n' + errors.join('\n') + '\n\nПодождите 15 секунд и попробуйте снова.');
 }
 
-// ===== РЕСТАВРАЦИЯ =====
+// ===== АНАЛИЗ ФОТО (для запасного варианта) =====
 function analyzeImage(base64Data) {
     return new Promise(function(resolve) {
         var img = new Image();
@@ -322,19 +322,117 @@ function analyzeImage(base64Data) {
     });
 }
 
+// ===== ПОДГОТОВКА ФОТО ДЛЯ IMG2IMG =====
+function prepareSourceBase64(base64Data) {
+    return new Promise(function(resolve) {
+        var img = new Image();
+        img.onload = function() {
+            var w = img.naturalWidth, h = img.naturalHeight;
+            if (!w || !h) { resolve(null); return; }
+            var max = 512;
+            var r = Math.min(max / w, max / h, 1);
+            w = Math.max(64, Math.round((w * r) / 64) * 64);
+            h = Math.max(64, Math.round((h * r) / 64) * 64);
+            var c = document.createElement('canvas');
+            c.width = w; c.height = h;
+            c.getContext('2d').drawImage(img, 0, 0, w, h);
+            resolve({
+                base64: c.toDataURL('image/jpeg', 0.85).split(',')[1],
+                width: w,
+                height: h
+            });
+        };
+        img.onerror = function() { resolve(null); };
+        img.src = base64Data;
+    });
+}
+
+// ===== СОХРАНЕНИЕ РЕЗУЛЬТАТА =====
+async function urlToStored(url) {
+    try {
+        var res = await fetch(url);
+        if (!res.ok) throw new Error('http');
+        var blob = await res.blob();
+        var dataUrl = await blobToDataUrl(blob);
+        return await downscale(dataUrl, 800);
+    } catch (e) {
+        return url;
+    }
+}
+
+// ===== НАСТОЯЩАЯ РЕСТАВРАЦИЯ: img2img через AI Horde =====
+async function restoreViaHordeImg2Img(source, prompt) {
+    var postResponse = await fetch('https://aihorde.net/api/v2/generate/async', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': '0000000000' },
+        body: JSON.stringify({
+            prompt: prompt + ', high quality, detailed',
+            params: {
+                width: source.width,
+                height: source.height,
+                steps: 18,
+                n: 1,
+                denoising_strength: 0.6,
+                cfg_scale: 7
+            },
+            source_image: source.base64,
+            source_processing: 'img2img',
+            models: ['stable_diffusion_2.1'],
+            nsfw: false
+        })
+    });
+    if (!postResponse.ok) throw new Error('Horde HTTP ' + postResponse.status);
+    var postData = await postResponse.json();
+    var jobId = postData.id;
+    if (!jobId) throw new Error('Horde: нет id задачи');
+
+    for (var attempt = 0; attempt < 60; attempt++) {
+        await sleep(3000);
+        var checkResponse = await fetch('https://aihorde.net/api/v2/generate/check/' + jobId);
+        var checkData = await checkResponse.json();
+        if (checkData.faulted) throw new Error('Horde: задача сломалась');
+        if (checkData.done) {
+            var statusResponse = await fetch('https://aihorde.net/api/v2/generate/status/' + jobId);
+            var statusData = await statusResponse.json();
+            if (statusData.generations && statusData.generations.length > 0 && statusData.generations[0].img) {
+                var stored = await urlToStored(statusData.generations[0].img);
+                return { url: stored, engine: 'horde-img2img' };
+            }
+            throw new Error('Horde: нет результата');
+        }
+    }
+    throw new Error('Horde: таймаут');
+}
+
+// ===== РЕСТАВРАЦИЯ (новая логика) =====
 async function restoreBuilding(originalBase64, description, styleName) {
     var styleDesc = STYLES[styleName] || '';
-    var analysis = await analyzeImage(originalBase64);
-    var parts = [
-        'beautiful restored building facade', 'pristine condition', 'newly repaired walls',
-        'intact complete windows with glass', 'clean restored facade', 'no damage no cracks no ruins',
-        'fully reconstructed', 'architectural photography', analysis, description, styleDesc
-    ];
-    var filtered = [];
-    for (var i = 0; i < parts.length; i++) {
-        if (parts[i] && parts[i].length > 0) filtered.push(parts[i]);
+
+    var prompt = [
+        'restored building facade',
+        'repaired walls',
+        'intact complete windows with glass',
+        'clean restored facade',
+        'no damage no cracks no ruins no graffiti',
+        'same building same composition',
+        description,
+        styleDesc,
+        'architectural photography'
+    ].filter(Boolean).join(', ');
+
+    // 1) Настоящий img2img: твоё фото = основа
+    var source = await prepareSourceBase64(originalBase64);
+    if (source) {
+        try {
+            return await restoreViaHordeImg2Img(source, prompt);
+        } catch (e) {
+            console.warn('img2img не сработал, запасной вариант:', e.message);
+        }
     }
-    return await smartGenerate(filtered.join(', '), true);
+
+    // 2) Запасной: генерация по тексту с анализом цветов фото
+    var analysis = await analyzeImage(originalBase64);
+    return await smartGenerate(prompt + ', ' + analysis, false);
 }
 
 // ===== ЗВУК =====
@@ -379,12 +477,12 @@ var AudioEngine = (function() {
 // ===== ЧАТ ПОДДЕРЖКИ =====
 var CHAT_RESPONSES = {
     generate: "🔧 <b>Генерация:</b><br>• 3 модели стартуют ОДНОВРЕМЕННО<br>• Результат — как только первая готова<br>• Пауза 15 сек между запросами (лимит API)",
-    restore: "🔧 <b>Реставрация:</b><br>• Анализирует цвета фото<br>• Генерирует восстановленную версию<br>• Каждый раз разная (случайные свет/ракурс)",
+    restore: "🔧 <b>Реставрация:</b><br>• Настоящий img2img через AI Horde<br>• Твоё фото — основа: модель дорисовывает разрушенное<br>• Сохраняет форму и композицию здания<br>• Если Horde недоступен — запасной вариант по тексту",
     slow: "⚡ <b>Скорость:</b><br>• Гонка моделей: turbo+flux+sana параллельно<br>• Выбери разрешение 640 — быстрее<br>• «Отдых API» — защита от блокировок",
     diverse: "🎲 <b>Разнообразие:</b><br>• Каждый запрос получает случайные:<br>— время суток и погоду<br>— ракурс камеры<br>— настроение и детали<br>• Одинаковых картинок не бывает!",
     gallery: "🔧 <b>Галерея:</b><br>• Хранится в localStorage<br>• 🗑️ под картинкой — удалить одну",
     teapot: "🫖 <b>Своя картинка чайника:</b><br>• Положи teapot.png рядом с index.html<br>• Сайт подхватит его автоматически",
-    emoji: "🔧 <b>Стикеры на ПК:</b><br>• Подключён Noto Color Emoji<br>• Если ч/б — нажми Ctrl+F5<br>• Или замени эмодзи на свои PNG (см. О проекте)",
+    emoji: "🔧 <b>Стикеры на ПК:</b><br>• Подключён Noto Color Emoji<br>• Если ч/б — нажми Ctrl+F5<br>• Или замени эмодзи на свои PNG (Ctrl+H в редакторе)",
     design: "🎭 <b>6 тем + 8 дизайнов + 3 разрешения</b> в настройках ⚙️ — комбинируй!"
 };
 
@@ -410,7 +508,6 @@ function handleChatQuestion(key) {
     }, 300);
 }
 
-// ===== КОНЕЦ ЧАСТИ 1 ИЗ 2 =====
 // =============================================
 // РЕСТАВРАТОР ФАСАДОВ — script.js (часть 2 из 2)
 // =============================================
@@ -513,7 +610,7 @@ function renderPage(page) {
             + '</div><button class="btn gothic-btn" id="btn-gen">🎲 Создать проект</button><div id="res-area"></div>';
     } else if (page === 'restore') {
         card.innerHTML = '<h2 class="page-title">🔨 Реставрация фасада</h2>'
-            + '<p style="color:var(--text-muted);margin-bottom:20px">Загрузите фото разрушенного здания. ИИ сгенерирует восстановленную версию — каждый раз разную.</p>'
+            + '<p style="color:var(--text-muted);margin-bottom:20px">Загрузите фото разрушенного здания. ИИ возьмёт его за основу и дорисует утраченные части (img2img).</p>'
             + '<div class="form-grid">'
             + '<div class="form-group full-width"><label>Фото здания</label><input type="file" id="rf" accept="image/*"></div>'
             + '<div class="form-group full-width"><label>Что восстановить?</label><textarea id="rp" placeholder="достроить крышу, восстановить окна..."></textarea></div>'
@@ -548,7 +645,7 @@ function renderPage(page) {
             + '<div class="stat-card"><div class="stat-value" style="color:var(--error)">' + STATE.learning.dislikes + '</div>Дизлайков</div>'
             + '<div class="stat-card"><div class="stat-value" style="color:var(--grad-b)">' + acc + '%</div>Точность</div></div>';
     } else {
-        card.innerHTML = '<h2 class="page-title">ℹ️ О проекте</h2><p><b>Реставратор фасадов</b> — клиентская JS-версия.<br>40 стилей · 4 движка · 6 тем · 8 дизайнов · 3 разрешения<br>🎲 Генератор разнообразия: каждый раз разные свет, ракурс, погода<br>🫖 Своя картинка чайника: teapot.png рядом с index.html<br>🖼 Свои иконки: замени эмодзи на PNG (Ctrl+H в редакторе)</p>';
+        card.innerHTML = '<h2 class="page-title">ℹ️ О проекте</h2><p><b>Реставратор фасадов</b> — клиентская JS-версия.<br>40 стилей · 4 движка · 6 тем · 8 дизайнов · 3 разрешения<br>🔨 Реставрация = img2img: твоё фото за основа, ИИ дорисовывает разрушенное<br>🫖 Своя картинка чайника: teapot.png рядом с index.html</p>';
     }
     main.appendChild(card);
     bindPageEvents();
@@ -645,7 +742,7 @@ function bindPageEvents() {
             var style = document.getElementById('rs').value;
             if (!fi.files || !fi.files[0]) return alert('Загрузите фото');
             if (!desc) return alert('Опишите что восстановить');
-            showLoading('🏗️ Реставрация (гонка моделей)...');
+            showLoading('🏗️ Реставрация (img2img, до 3 минут)...');
             var reader = new FileReader();
             reader.onload = async function(ev) {
                 try {
@@ -809,3 +906,4 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ===== КОНЕЦ ФАЙЛА =====
+// ===== КОНЕЦ ЧАСТИ 1 ИЗ 2 =====
