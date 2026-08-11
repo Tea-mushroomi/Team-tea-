@@ -1,7 +1,7 @@
-
 // =============================================
 // РЕСТАВРАТОР ФАСАДОВ — script.js (часть 1 из 2)
-// Стили, состояние, генерация, реставрация, звук, чат
+// 4 движка: HORDE (по умолчанию) + Sana + Flux + Turbo
+// 5 вариаций дизайна
 // =============================================
 
 var STYLES = {
@@ -55,7 +55,8 @@ var STATE = {
     tea: parseInt(localStorage.getItem('tb')) || 0,
     soundEnabled: localStorage.getItem('snd') !== '0',
     theme: localStorage.getItem('thm') || 'gothic',
-    selectedModel: localStorage.getItem('mdl') || 'sana',
+    design: localStorage.getItem('dsg') || 'classic',
+    selectedModel: localStorage.getItem('mdl') || 'horde',
     history: JSON.parse(localStorage.getItem('hist') || '[]'),
     learning: JSON.parse(localStorage.getItem('lrn') || '{"generations":0,"likes":0,"dislikes":0}')
 };
@@ -65,15 +66,13 @@ function saveState() {
     localStorage.setItem('tb', STATE.tea);
     localStorage.setItem('snd', STATE.soundEnabled ? '1' : '0');
     localStorage.setItem('thm', STATE.theme);
+    localStorage.setItem('dsg', STATE.design);
     localStorage.setItem('mdl', STATE.selectedModel);
     localStorage.setItem('hist', JSON.stringify(STATE.history));
     localStorage.setItem('lrn', JSON.stringify(STATE.learning));
 }
 
-// ===== ГЕНЕРАЦИЯ ЧЕРЕЗ POLLINATIONS =====
-// Обычный <img src=url> БЕЗ crossOrigin — обходит CORS
-// Сохраняем URL напрямую — никаких canvas/toDataURL проблем
-
+// ===== POLLINATIONS (img без CORS) =====
 function buildImageUrl(prompt, modelName) {
     var fullPrompt = prompt + ', ' + BUILDING_BOOST;
     var encodedPrompt = encodeURIComponent(fullPrompt);
@@ -90,27 +89,84 @@ function waitForImageLoad(url) {
         var img = new Image();
         var timeoutId = setTimeout(function() {
             img.src = '';
-            reject(new Error('Таймаут 180 секунд — сервер не ответил'));
+            reject(new Error('Таймаут 180 секунд'));
         }, 180000);
         img.onload = function() {
             clearTimeout(timeoutId);
-            if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-                resolve(url);
-            } else {
-                reject(new Error('Сервер вернул пустое изображение'));
-            }
+            if (img.naturalWidth > 0 && img.naturalHeight > 0) resolve(url);
+            else reject(new Error('Пустое изображение'));
         };
         img.onerror = function() {
             clearTimeout(timeoutId);
-            reject(new Error('Ошибка загрузки изображения'));
+            reject(new Error('Ошибка загрузки'));
         };
         img.src = url;
     });
 }
 
-async function generateWithFallback(prompt) {
-    // 3 движка: sana → flux → turbo
-    var modelsToTry = [STATE.selectedModel, 'sana', 'flux', 'turbo'];
+// ===== AI HORDE (асинхронная генерация, анонимный ключ) =====
+async function generateViaHorde(prompt) {
+    var fullPrompt = prompt + ', ' + BUILDING_BOOST;
+
+    // 1. Отправляем задачу
+    var postResponse = await fetch('https://aihorde.net/api/v2/generate/async', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'apikey': '0000000000'
+        },
+        body: JSON.stringify({
+            prompt: fullPrompt,
+            params: {
+                width: 512,
+                height: 512,
+                steps: 20,
+                n: 1
+            },
+            models: ['stable_diffusion_2.1'],
+            nsfw: false
+        })
+    });
+
+    if (!postResponse.ok) {
+        throw new Error('Horde HTTP ' + postResponse.status);
+    }
+    var postData = await postResponse.json();
+    var jobId = postData.id;
+    if (!jobId) throw new Error('Horde: не получен id задачи');
+
+    // 2. Ждём результат (опрос каждые 3 сек, до 180 сек)
+    for (var attempt = 0; attempt < 60; attempt++) {
+        await new Promise(function(r) { setTimeout(r, 3000); });
+
+        var checkResponse = await fetch('https://aihorde.net/api/v2/generate/check/' + jobId);
+        var checkData = await checkResponse.json();
+
+        if (checkData.faulted) throw new Error('Horde: задача сломалась');
+
+        if (checkData.done) {
+            var statusResponse = await fetch('https://aihorde.net/api/v2/generate/status/' + jobId);
+            var statusData = await statusResponse.json();
+            if (statusData.generations && statusData.generations.length > 0 && statusData.generations[0].img) {
+                return { url: statusData.generations[0].img, engine: 'horde' };
+            }
+            throw new Error('Horde: нет результата');
+        }
+    }
+    throw new Error('Horde: таймаут ожидания');
+}
+
+// ===== ОБЩАЯ ГЕНЕРАЦИЯ С ФОЛБЭКОМ =====
+// preferHorde=true — для реставратора (horde всегда первый)
+async function generateWithFallback(prompt, preferHorde) {
+    var modelsToTry;
+    if (preferHorde) {
+        modelsToTry = ['horde', STATE.selectedModel, 'sana', 'flux', 'turbo'];
+    } else {
+        modelsToTry = [STATE.selectedModel, 'horde', 'sana', 'flux', 'turbo'];
+    }
+
+    // Убираем дубликаты
     var uniqueModels = [];
     var i;
     for (i = 0; i < modelsToTry.length; i++) {
@@ -118,10 +174,14 @@ async function generateWithFallback(prompt) {
             uniqueModels.push(modelsToTry[i]);
         }
     }
+
     var errors = [];
     for (i = 0; i < uniqueModels.length; i++) {
         var model = uniqueModels[i];
         try {
+            if (model === 'horde') {
+                return await generateViaHorde(prompt);
+            }
             var url = buildImageUrl(prompt, model);
             await waitForImageLoad(url);
             return { url: url, engine: model };
@@ -133,11 +193,10 @@ async function generateWithFallback(prompt) {
     throw new Error(
         'Все модели недоступны:\n' + errors.join('\n')
         + '\n\nПодождите 15 секунд и попробуйте снова.'
-        + '\nБесплатный API: 1 запрос / 15 сек.'
     );
 }
 
-// ===== РЕСТАВРАЦИЯ =====
+// ===== РЕСТАВРАЦИЯ (horde по умолчанию) =====
 function analyzeImage(base64Data) {
     return new Promise(function(resolve) {
         var img = new Image();
@@ -196,10 +255,11 @@ async function restoreBuilding(originalBase64, description, styleName) {
     for (var i = 0; i < parts.length; i++) {
         if (parts[i] && parts[i].length > 0) filtered.push(parts[i]);
     }
-    return await generateWithFallback(filtered.join(', '));
+    // preferHorde = true — реставратор всегда сначала пробует horde
+    return await generateWithFallback(filtered.join(', '), true);
 }
 
-// ===== ЗВУКОВОЙ ДВИЖОК =====
+// ===== ЗВУК =====
 var AudioEngine = (function() {
     var audioCtx = null;
     function getCtx() {
@@ -251,14 +311,15 @@ var AudioEngine = (function() {
 
 // ===== ЧАТ ПОДДЕРЖКИ =====
 var CHAT_RESPONSES = {
-    generate: "🔧 <b>Генерация:</b><br>• Pollinations — бесплатный API<br>• 3 движка: Sana, Flux, Turbo<br>• Лимит: 1 запрос / 15 сек<br>• Подождите и попробуйте снова<br>• Генерация: 10-60 секунд",
-    restore: "🔧 <b>Реставрация:</b><br>• Анализирует цвета фото<br>• Генерирует восстановленную версию<br>• Чем подробнее описание — тем лучше<br>• Работает через те же 3 движка",
+    generate: "🔧 <b>Генерация:</b><br>• 4 движка: Horde, Sana, Flux, Turbo<br>• Если один упал — пробуется следующий<br>• Лимит бесплатного API: 1 запрос / 15 сек<br>• Генерация: 10-60 секунд",
+    restore: "🔧 <b>Реставрация:</b><br>• По умолчанию идёт через <b>Horde</b><br>• Анализирует цвета фото<br>• Генерирует восстановленную версию<br>• Чем подробнее описание — тем лучше",
     gallery: "🔧 <b>Галерея:</b><br>• Хранится в localStorage<br>• Лимит 50 изображений<br>• 🗑️ под картинкой — удалить одну<br>• «Удалить всё» — очистить",
     footer: "🔧 <b>Подвал:</b><br>• Просмотр картинок — отдельная модалка<br>• Не связана с чайником<br>• Не ломает подвал",
     hamster: "🐹 <b>Хомяк:</b><br>• Появляется во время генерации<br>• Тапайте для монет 🪙<br>• Монеты сохраняются",
     teapot: "🫖 <b>Чайник:</b><br>• Секретная пасхалка!<br>• Ищите 🫖 в подвале сайта<br>• Полупрозрачный, правый нижний угол<br>• +1 чайный пакетик 🍵 при клике",
-    slow: "🔧 <b>Скорость:</b><br>• 10-60 сек — нормально<br>• Sana — новая модель, может быть медленнее<br>• Turbo — самая быстрая<br>• Flux — баланс скорости и качества",
-    styles: "🎨 <b>40 стилей:</b><br>• От Хрущёвки до Киберпанка<br>• Все в выпадающем списке"
+    slow: "🔧 <b>Скорость:</b><br>• Horde — медленный но качественный (до 2-3 мин)<br>• Turbo — самая быстрая<br>• Sana и Flux — баланс<br>• Переключите модель в ⚙️",
+    styles: "🎨 <b>40 стилей:</b><br>• От Хрущёвки до Киберпанка<br>• Все в выпадающем списке",
+    design: "🎨 <b>Дизайн:</b><br>• 5 вариаций в настройках ⚙️<br>• Классика, Брутализм, Винтаж, Неон, Мягкий<br>• Чтобы сайт не выглядел как шаблон"
 };
 
 function handleChatQuestion(key) {
@@ -267,7 +328,7 @@ function handleChatQuestion(key) {
         generate: 'Не генерирует', restore: 'Не реставрирует',
         gallery: 'Галерея', footer: 'Подвал глючит',
         hamster: 'Хомяк', teapot: 'Где чайник?',
-        slow: 'Медленно', styles: 'Стили'
+        slow: 'Медленно', styles: 'Стили', design: 'Дизайн'
     };
     var userMsg = document.createElement('div');
     userMsg.className = 'chat-msg user';
@@ -286,7 +347,6 @@ function handleChatQuestion(key) {
 // ===== КОНЕЦ ЧАСТИ 1 ИЗ 2 =====
 // =============================================
 // РЕСТАВРАТОР ФАСАДОВ — script.js (часть 2 из 2)
-// Навигация, рендеринг, обработчики, инициализация
 // =============================================
 
 var currentPage = 'generate';
@@ -299,6 +359,12 @@ function setTheme(name) {
     for (var i = 0; i < btns.length; i++) {
         btns[i].classList.toggle('active', btns[i].dataset.theme === name);
     }
+}
+
+function setDesign(name) {
+    STATE.design = name;
+    saveState();
+    document.body.dataset.design = name;
 }
 
 function updateUI() {
@@ -374,7 +440,7 @@ function renderPage(page) {
     } else if (page === 'restore') {
         card.innerHTML = '<h2 class="page-title">🔨 Реставрация фасада</h2>'
             + '<p style="color:var(--text-muted);margin-bottom:20px">'
-            + 'Загрузите фото разрушенного здания. ИИ сгенерирует восстановленную версию.</p>'
+            + 'Загрузите фото разрушенного здания. ИИ (Horde по умолчанию) сгенерирует восстановленную версию.</p>'
             + '<div class="form-grid">'
             + '<div class="form-group full-width"><label>Фото здания</label>'
             + '<input type="file" id="rf" accept="image/*"></div>'
@@ -421,9 +487,8 @@ function renderPage(page) {
     } else {
         card.innerHTML = '<h2 class="page-title">ℹ️ О проекте</h2>'
             + '<p><b>Реставратор фасадов</b> — клиентская JS-версия.<br>'
-            + '40 стилей · 3 движка: Sana + Flux + Turbo<br>'
-            + 'Pollinations AI (бесплатно, без ключей)<br>'
-            + 'Лимит: 1 запрос / 15 сек<br>'
+            + '40 стилей · 4 движка: Horde (по умолчанию для реставрации) + Sana + Flux + Turbo<br>'
+            + '5 вариаций дизайна в настройках ⚙️<br>'
             + 'Чат поддержки 💬 слева внизу.</p>';
     }
 
@@ -486,9 +551,9 @@ async function performGeneration(prompt, styleName) {
     var parts = [prompt];
     if (STYLES[styleName] && STYLES[styleName].length > 0) parts.push(STYLES[styleName]);
     var fullPrompt = parts.join(', ');
-    showLoading('🎨 Генерация... (10-60 сек)');
+    showLoading('🎨 Генерация... (10-180 сек, horde может быть медленным)');
     try {
-        var result = await generateWithFallback(fullPrompt);
+        var result = await generateWithFallback(fullPrompt, false);
         result.style = styleName;
         result.date = new Date().toISOString();
         STATE.history.unshift(result);
@@ -507,7 +572,7 @@ async function performGeneration(prompt, styleName) {
     }
 }
 
-// ===== ОБРАБОТЧИКИ СОБЫТИЙ =====
+// ===== ОБРАБОТЧИКИ =====
 function bindPageEvents() {
     var gb = document.getElementById('btn-gen');
     if (gb) {
@@ -526,7 +591,7 @@ function bindPageEvents() {
             var style = document.getElementById('rs').value;
             if (!fi.files || !fi.files[0]) return alert('Загрузите фото');
             if (!desc) return alert('Опишите что восстановить');
-            showLoading('🏗️ Реставрация... (10-60 сек)');
+            showLoading('🏗️ Реставрация через Horde... (может занять до 3 минут)');
             var reader = new FileReader();
             reader.onload = async function(ev) {
                 try {
@@ -583,10 +648,10 @@ function bindGalleryEvents() {
 // ===== ИНИЦИАЛИЗАЦИЯ =====
 document.addEventListener('DOMContentLoaded', function() {
     setTheme(STATE.theme);
+    setDesign(STATE.design);
     updateUI();
     renderPage('generate');
 
-    // Звёзды
     var sb = document.getElementById('stars');
     for (var i = 0; i < 9; i++) {
         var s = document.createElement('div');
@@ -596,7 +661,6 @@ document.addEventListener('DOMContentLoaded', function() {
         sb.appendChild(s);
     }
 
-    // Навигация
     var navBtns = document.querySelectorAll('.nav-btn');
     for (var n = 0; n < navBtns.length; n++) {
         navBtns[n].addEventListener('click', function(e) {
@@ -605,7 +669,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Панель настроек
     var panel = document.getElementById('settings-panel');
     document.getElementById('settings-btn').addEventListener('click', function(e) {
         e.stopPropagation();
@@ -617,7 +680,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Темы
     var themeBtns = document.querySelectorAll('.theme-btn');
     for (var t = 0; t < themeBtns.length; t++) {
         themeBtns[t].addEventListener('click', function() {
@@ -626,14 +688,12 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Звук
     document.getElementById('sound-on').checked = STATE.soundEnabled;
     document.getElementById('sound-on').addEventListener('change', function(e) {
         STATE.soundEnabled = e.target.checked;
         saveState();
     });
 
-    // Модель (3 движка: sana, flux, turbo)
     document.getElementById('model-select').value = STATE.selectedModel;
     document.getElementById('model-select').addEventListener('change', function(e) {
         STATE.selectedModel = e.target.value;
@@ -641,7 +701,12 @@ document.addEventListener('DOMContentLoaded', function() {
         AudioEngine.click();
     });
 
-    // Сброс валюты
+    document.getElementById('design-select').value = STATE.design;
+    document.getElementById('design-select').addEventListener('change', function(e) {
+        setDesign(e.target.value);
+        AudioEngine.click();
+    });
+
     document.getElementById('reset-coins').addEventListener('click', function() {
         STATE.coins = 0;
         STATE.tea = 0;
@@ -650,7 +715,6 @@ document.addEventListener('DOMContentLoaded', function() {
         AudioEngine.click();
     });
 
-    // Хомяк
     var ham = document.getElementById('hamster');
     ham.addEventListener('click', function(e) {
         e.stopPropagation();
@@ -664,13 +728,11 @@ document.addEventListener('DOMContentLoaded', function() {
         AudioEngine.click();
     });
 
-    // Лайтбокс
     document.getElementById('lb-close-btn').addEventListener('click', closeLightbox);
     document.getElementById('lightbox-modal').addEventListener('click', function(e) {
         if (e.target === document.getElementById('lightbox-modal')) closeLightbox();
     });
 
-    // Чайник
     document.getElementById('teapot-link').addEventListener('click', function(e) {
         e.preventDefault();
         document.getElementById('teapot-modal').classList.add('active');
@@ -686,7 +748,6 @@ document.addEventListener('DOMContentLoaded', function() {
         AudioEngine.whistle();
     });
 
-    // Чат поддержки
     var chatPanel = document.getElementById('chat-panel');
     document.getElementById('chat-btn').addEventListener('click', function(e) {
         e.stopPropagation();
