@@ -1,7 +1,6 @@
 // =============================================
 // РЕСТАВРАТОР ФАСАДОВ — script.js (часть 1 из 2)
-// 4 движка: HORDE (по умолчанию) + Sana + Flux + Turbo
-// 5 вариаций дизайна
+// Исправлено: без nologo, защита от отсутствующих элементов
 // =============================================
 
 var STYLES = {
@@ -72,7 +71,46 @@ function saveState() {
     localStorage.setItem('lrn', JSON.stringify(STATE.learning));
 }
 
-// ===== POLLINATIONS (img без CORS) =====
+// Безопасный доступ к элементам (не крашится если элемента нет)
+function on(id, evt, fn) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener(evt, fn);
+    return el;
+}
+
+// ===== УТИЛИТЫ КОНВЕРТАЦИИ =====
+function blobToDataUrl(blob) {
+    return new Promise(function(resolve, reject) {
+        var reader = new FileReader();
+        reader.onloadend = function() { resolve(reader.result); };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+}
+
+function downscale(dataUrl, maxSize) {
+    return new Promise(function(resolve) {
+        var img = new Image();
+        img.onload = function() {
+            var w = img.naturalWidth, h = img.naturalHeight;
+            if (!w || !h) { resolve(dataUrl); return; }
+            if (w > maxSize || h > maxSize) {
+                var r = Math.min(maxSize / w, maxSize / h);
+                w = Math.round(w * r);
+                h = Math.round(h * r);
+            }
+            var c = document.createElement('canvas');
+            c.width = w;
+            c.height = h;
+            c.getContext('2d').drawImage(img, 0, 0, w, h);
+            resolve(c.toDataURL('image/jpeg', 0.7));
+        };
+        img.onerror = function() { resolve(dataUrl); };
+        img.src = dataUrl;
+    });
+}
+
+// ===== POLLINATIONS (БЕЗ nologo — он требует аккаунт!) =====
 function buildImageUrl(prompt, modelName) {
     var fullPrompt = prompt + ', ' + BUILDING_BOOST;
     var encodedPrompt = encodeURIComponent(fullPrompt);
@@ -80,7 +118,7 @@ function buildImageUrl(prompt, modelName) {
     var seed = Math.floor(Math.random() * 999999);
     return 'https://image.pollinations.ai/prompt/' + encodedPrompt
         + '?width=1024&height=1024&seed=' + seed
-        + '&nologo=true&negative=' + encodedNegative
+        + '&negative=' + encodedNegative
         + '&model=' + modelName;
 }
 
@@ -93,7 +131,7 @@ function waitForImageLoad(url) {
         }, 180000);
         img.onload = function() {
             clearTimeout(timeoutId);
-            if (img.naturalWidth > 0 && img.naturalHeight > 0) resolve(url);
+            if (img.naturalWidth > 0 && img.naturalHeight > 0) resolve();
             else reject(new Error('Пустое изображение'));
         };
         img.onerror = function() {
@@ -104,46 +142,47 @@ function waitForImageLoad(url) {
     });
 }
 
-// ===== AI HORDE (асинхронная генерация, анонимный ключ) =====
+async function generateViaPollinations(prompt, model) {
+    var url = buildImageUrl(prompt, model);
+    // Сначала fetch — даёт реальный статус ошибки и base64 для хранения
+    try {
+        var res = await fetch(url);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var blob = await res.blob();
+        if (blob.size < 1000) throw new Error('Пустой ответ сервера');
+        var dataUrl = await blobToDataUrl(blob);
+        var small = await downscale(dataUrl, 800);
+        return { url: small, engine: model };
+    } catch (fetchError) {
+        // Если fetch заблокирован — пробуем обычный <img>
+        await waitForImageLoad(url);
+        return { url: url, engine: model };
+    }
+}
+
+// ===== AI HORDE =====
 async function generateViaHorde(prompt) {
     var fullPrompt = prompt + ', ' + BUILDING_BOOST;
-
-    // 1. Отправляем задачу
     var postResponse = await fetch('https://aihorde.net/api/v2/generate/async', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'apikey': '0000000000'
-        },
+        headers: { 'Content-Type': 'application/json', 'apikey': '0000000000' },
         body: JSON.stringify({
             prompt: fullPrompt,
-            params: {
-                width: 512,
-                height: 512,
-                steps: 20,
-                n: 1
-            },
+            params: { width: 512, height: 512, steps: 20, n: 1 },
             models: ['stable_diffusion_2.1'],
             nsfw: false
         })
     });
-
-    if (!postResponse.ok) {
-        throw new Error('Horde HTTP ' + postResponse.status);
-    }
+    if (!postResponse.ok) throw new Error('Horde HTTP ' + postResponse.status);
     var postData = await postResponse.json();
     var jobId = postData.id;
-    if (!jobId) throw new Error('Horde: не получен id задачи');
+    if (!jobId) throw new Error('Horde: нет id задачи');
 
-    // 2. Ждём результат (опрос каждые 3 сек, до 180 сек)
     for (var attempt = 0; attempt < 60; attempt++) {
         await new Promise(function(r) { setTimeout(r, 3000); });
-
         var checkResponse = await fetch('https://aihorde.net/api/v2/generate/check/' + jobId);
         var checkData = await checkResponse.json();
-
         if (checkData.faulted) throw new Error('Horde: задача сломалась');
-
         if (checkData.done) {
             var statusResponse = await fetch('https://aihorde.net/api/v2/generate/status/' + jobId);
             var statusData = await statusResponse.json();
@@ -153,11 +192,10 @@ async function generateViaHorde(prompt) {
             throw new Error('Horde: нет результата');
         }
     }
-    throw new Error('Horde: таймаут ожидания');
+    throw new Error('Horde: таймаут');
 }
 
 // ===== ОБЩАЯ ГЕНЕРАЦИЯ С ФОЛБЭКОМ =====
-// preferHorde=true — для реставратора (horde всегда первый)
 async function generateWithFallback(prompt, preferHorde) {
     var modelsToTry;
     if (preferHorde) {
@@ -165,35 +203,23 @@ async function generateWithFallback(prompt, preferHorde) {
     } else {
         modelsToTry = [STATE.selectedModel, 'horde', 'sana', 'flux', 'turbo'];
     }
-
-    // Убираем дубликаты
     var uniqueModels = [];
     var i;
     for (i = 0; i < modelsToTry.length; i++) {
-        if (uniqueModels.indexOf(modelsToTry[i]) === -1) {
-            uniqueModels.push(modelsToTry[i]);
-        }
+        if (uniqueModels.indexOf(modelsToTry[i]) === -1) uniqueModels.push(modelsToTry[i]);
     }
-
     var errors = [];
     for (i = 0; i < uniqueModels.length; i++) {
         var model = uniqueModels[i];
         try {
-            if (model === 'horde') {
-                return await generateViaHorde(prompt);
-            }
-            var url = buildImageUrl(prompt, model);
-            await waitForImageLoad(url);
-            return { url: url, engine: model };
+            if (model === 'horde') return await generateViaHorde(prompt);
+            return await generateViaPollinations(prompt, model);
         } catch (error) {
             errors.push(model + ': ' + (error.message || 'ошибка'));
             console.warn('Модель ' + model + ' не сработала:', error.message);
         }
     }
-    throw new Error(
-        'Все модели недоступны:\n' + errors.join('\n')
-        + '\n\nПодождите 15 секунд и попробуйте снова.'
-    );
+    throw new Error('Все модели недоступны:\n' + errors.join('\n') + '\n\nПодождите 15 секунд и попробуйте снова.');
 }
 
 // ===== РЕСТАВРАЦИЯ (horde по умолчанию) =====
@@ -209,10 +235,7 @@ function analyzeImage(base64Data) {
             var pixels = ctx.getImageData(0, 0, 32, 32).data;
             var totalR = 0, totalG = 0, totalB = 0, count = 0;
             for (var i = 0; i < pixels.length; i += 4) {
-                totalR += pixels[i];
-                totalG += pixels[i + 1];
-                totalB += pixels[i + 2];
-                count++;
+                totalR += pixels[i]; totalG += pixels[i + 1]; totalB += pixels[i + 2]; count++;
             }
             var avgR = Math.round(totalR / count);
             var avgG = Math.round(totalG / count);
@@ -228,9 +251,7 @@ function analyzeImage(base64Data) {
             else if (avgR > 150 && avgG > 130 && avgB < 100) hue = 'warm yellow plaster walls';
             resolve(tone + ', ' + hue + ', aged texture, weathered surface');
         };
-        img.onerror = function() {
-            resolve('old building, weathered facade, aged texture');
-        };
+        img.onerror = function() { resolve('old building, weathered facade, aged texture'); };
         img.src = base64Data;
     });
 }
@@ -239,23 +260,14 @@ async function restoreBuilding(originalBase64, description, styleName) {
     var styleDesc = STYLES[styleName] || '';
     var analysis = await analyzeImage(originalBase64);
     var parts = [
-        'beautiful restored building facade',
-        'pristine condition',
-        'newly repaired walls',
-        'intact complete windows with glass',
-        'clean restored facade',
-        'no damage no cracks no ruins',
-        'fully reconstructed',
-        'architectural photography',
-        analysis,
-        description,
-        styleDesc
+        'beautiful restored building facade', 'pristine condition', 'newly repaired walls',
+        'intact complete windows with glass', 'clean restored facade', 'no damage no cracks no ruins',
+        'fully reconstructed', 'architectural photography', analysis, description, styleDesc
     ];
     var filtered = [];
     for (var i = 0; i < parts.length; i++) {
         if (parts[i] && parts[i].length > 0) filtered.push(parts[i]);
     }
-    // preferHorde = true — реставратор всегда сначала пробует horde
     return await generateWithFallback(filtered.join(', '), true);
 }
 
@@ -276,34 +288,25 @@ var AudioEngine = (function() {
             osc.frequency.setValueAtTime(freq, c.currentTime);
             gain.gain.setValueAtTime(volume || 0.1, c.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + duration);
-            osc.connect(gain);
-            gain.connect(c.destination);
-            osc.start();
-            osc.stop(c.currentTime + duration);
+            osc.connect(gain); gain.connect(c.destination);
+            osc.start(); osc.stop(c.currentTime + duration);
         } catch (e) {}
     }
     return {
         click: function() { playTone(800 + Math.random() * 400, 'sine', 0.08, 0.05); },
-        success: function() {
-            playTone(523, 'triangle', 0.3);
-            setTimeout(function() { playTone(659, 'triangle', 0.4); }, 150);
-        },
+        success: function() { playTone(523, 'triangle', 0.3); setTimeout(function() { playTone(659, 'triangle', 0.4); }, 150); },
         error: function() { playTone(150, 'sawtooth', 0.5, 0.15); },
         whistle: function() {
             if (!STATE.soundEnabled) return;
             try {
-                var c = getCtx();
-                var o = c.createOscillator();
-                var g = c.createGain();
+                var c = getCtx(), o = c.createOscillator(), g = c.createGain();
                 o.frequency.setValueAtTime(880, c.currentTime);
                 o.frequency.exponentialRampToValueAtTime(1760, c.currentTime + 0.4);
                 g.gain.setValueAtTime(0.001, c.currentTime);
                 g.gain.linearRampToValueAtTime(0.3, c.currentTime + 0.1);
                 g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 1.2);
-                o.connect(g);
-                g.connect(c.destination);
-                o.start();
-                o.stop(c.currentTime + 1.3);
+                o.connect(g); g.connect(c.destination);
+                o.start(); o.stop(c.currentTime + 1.3);
             } catch (e) {}
         }
     };
@@ -311,23 +314,23 @@ var AudioEngine = (function() {
 
 // ===== ЧАТ ПОДДЕРЖКИ =====
 var CHAT_RESPONSES = {
-    generate: "🔧 <b>Генерация:</b><br>• 4 движка: Horde, Sana, Flux, Turbo<br>• Если один упал — пробуется следующий<br>• Лимит бесплатного API: 1 запрос / 15 сек<br>• Генерация: 10-60 секунд",
-    restore: "🔧 <b>Реставрация:</b><br>• По умолчанию идёт через <b>Horde</b><br>• Анализирует цвета фото<br>• Генерирует восстановленную версию<br>• Чем подробнее описание — тем лучше",
-    gallery: "🔧 <b>Галерея:</b><br>• Хранится в localStorage<br>• Лимит 50 изображений<br>• 🗑️ под картинкой — удалить одну<br>• «Удалить всё» — очистить",
-    footer: "🔧 <b>Подвал:</b><br>• Просмотр картинок — отдельная модалка<br>• Не связана с чайником<br>• Не ломает подвал",
-    hamster: "🐹 <b>Хомяк:</b><br>• Появляется во время генерации<br>• Тапайте для монет 🪙<br>• Монеты сохраняются",
-    teapot: "🫖 <b>Чайник:</b><br>• Секретная пасхалка!<br>• Ищите 🫖 в подвале сайта<br>• Полупрозрачный, правый нижний угол<br>• +1 чайный пакетик 🍵 при клике",
-    slow: "🔧 <b>Скорость:</b><br>• Horde — медленный но качественный (до 2-3 мин)<br>• Turbo — самая быстрая<br>• Sana и Flux — баланс<br>• Переключите модель в ⚙️",
-    styles: "🎨 <b>40 стилей:</b><br>• От Хрущёвки до Киберпанка<br>• Все в выпадающем списке",
-    design: "🎨 <b>Дизайн:</b><br>• 5 вариаций в настройках ⚙️<br>• Классика, Брутализм, Винтаж, Неон, Мягкий<br>• Чтобы сайт не выглядел как шаблон"
+    generate: "🔧 <b>Генерация:</b><br>• 4 движка: Horde, Sana, Flux, Turbo<br>• Если один упал — пробуется следующий<br>• Лимит: 1 запрос / 15 сек<br>• Генерация: 10-180 секунд",
+    restore: "🔧 <b>Реставрация:</b><br>• По умолчанию через <b>Horde</b><br>• Анализирует цвета фото<br>• Генерирует восстановленную версию",
+    gallery: "🔧 <b>Галерея:</b><br>• Хранится в localStorage<br>• Лимит 50 изображений<br>• 🗑️ под картинкой — удалить одну",
+    footer: "🔧 <b>Подвал:</b><br>• Просмотр картинок — отдельная модалка<br>• Не ломает подвал",
+    hamster: "🐹 Появляется во время генерации. Тапайте для монет 🪙",
+    teapot: "🫖 Секретная пасхалка! Ищите 🫖 в подвале сайта.",
+    slow: "🔧 Horde — до 3 минут. Turbo — самая быстрая. Переключите в ⚙️",
+    styles: "🎨 40 стилей от Хрущёвки до Киберпанка.",
+    design: "🎨 5 вариаций дизайна в настройках ⚙️"
 };
 
 function handleChatQuestion(key) {
     var msgs = document.getElementById('chat-messages');
+    if (!msgs) return;
     var labels = {
-        generate: 'Не генерирует', restore: 'Не реставрирует',
-        gallery: 'Галерея', footer: 'Подвал глючит',
-        hamster: 'Хомяк', teapot: 'Где чайник?',
+        generate: 'Не генерирует', restore: 'Не реставрирует', gallery: 'Галерея',
+        footer: 'Подвал', hamster: 'Хомяк', teapot: 'Чайник',
         slow: 'Медленно', styles: 'Стили', design: 'Дизайн'
     };
     var userMsg = document.createElement('div');
@@ -368,22 +371,26 @@ function setDesign(name) {
 }
 
 function updateUI() {
-    document.getElementById('coin-num').textContent = STATE.coins;
-    document.getElementById('tea-num').textContent = STATE.tea;
-    document.getElementById('f-gens').textContent = STATE.learning.generations;
-    document.getElementById('f-likes').textContent = STATE.learning.likes;
-    document.getElementById('f-dislikes').textContent = STATE.learning.dislikes;
+    var el;
+    el = document.getElementById('coin-num'); if (el) el.textContent = STATE.coins;
+    el = document.getElementById('tea-num'); if (el) el.textContent = STATE.tea;
+    el = document.getElementById('f-gens'); if (el) el.textContent = STATE.learning.generations;
+    el = document.getElementById('f-likes'); if (el) el.textContent = STATE.learning.likes;
+    el = document.getElementById('f-dislikes'); if (el) el.textContent = STATE.learning.dislikes;
     var total = STATE.learning.likes + STATE.learning.dislikes;
-    document.getElementById('f-acc').textContent = total > 0 ? Math.round(STATE.learning.likes / total * 100) : 0;
+    el = document.getElementById('f-acc'); if (el) el.textContent = total > 0 ? Math.round(STATE.learning.likes / total * 100) : 0;
 }
 
 function showLoading(msg) {
-    document.getElementById('loading-text').textContent = msg;
-    document.getElementById('loading-overlay').classList.add('active');
+    var el = document.getElementById('loading-text');
+    if (el) el.textContent = msg;
+    var ov = document.getElementById('loading-overlay');
+    if (ov) ov.classList.add('active');
 }
 
 function hideLoading() {
-    document.getElementById('loading-overlay').classList.remove('active');
+    var ov = document.getElementById('loading-overlay');
+    if (ov) ov.classList.remove('active');
 }
 
 function spawnCoin(x, y) {
@@ -393,9 +400,7 @@ function spawnCoin(x, y) {
     el.style.left = x + 'px';
     el.style.top = y + 'px';
     document.body.appendChild(el);
-    setTimeout(function() {
-        if (el.parentNode) el.parentNode.removeChild(el);
-    }, 1600);
+    setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 1600);
 }
 
 function navigateTo(page) {
@@ -413,53 +418,37 @@ function navigateTo(page) {
     }, 450);
 }
 
-// ===== РЕНДЕРИНГ СТРАНИЦ =====
 function renderPage(page) {
     var main = document.getElementById('main-content');
+    if (!main) return;
     main.innerHTML = '';
     var card = document.createElement('div');
     card.className = 'card gothic-card';
     var styleKeys = Object.keys(STYLES);
     var opts = '';
-    for (var i = 0; i < styleKeys.length; i++) {
-        opts += '<option>' + styleKeys[i] + '</option>';
-    }
+    for (var i = 0; i < styleKeys.length; i++) opts += '<option>' + styleKeys[i] + '</option>';
 
     if (page === 'generate') {
         card.innerHTML = '<h2 class="page-title">📝 Генерация здания</h2>'
             + '<div class="form-grid">'
-            + '<div class="form-group full-width"><label>Описание</label>'
-            + '<textarea id="gp" placeholder="Опишите здание подробно..."></textarea></div>'
-            + '<div class="form-group"><label>Стиль (' + styleKeys.length + ')</label>'
-            + '<select id="gs">' + opts + '</select></div>'
-            + '<div class="form-group"><label>Seed</label>'
-            + '<input type="number" id="gseed" placeholder="Случайно"></div>'
-            + '</div><button class="btn gothic-btn" id="btn-gen">✨ Создать проект</button>'
-            + '<div id="res-area"></div>';
-
+            + '<div class="form-group full-width"><label>Описание</label><textarea id="gp" placeholder="Опишите здание подробно..."></textarea></div>'
+            + '<div class="form-group"><label>Стиль (' + styleKeys.length + ')</label><select id="gs">' + opts + '</select></div>'
+            + '<div class="form-group"><label>Seed</label><input type="number" id="gseed" placeholder="Случайно"></div>'
+            + '</div><button class="btn gothic-btn" id="btn-gen">✨ Создать проект</button><div id="res-area"></div>';
     } else if (page === 'restore') {
         card.innerHTML = '<h2 class="page-title">🔨 Реставрация фасада</h2>'
-            + '<p style="color:var(--text-muted);margin-bottom:20px">'
-            + 'Загрузите фото разрушенного здания. ИИ (Horde по умолчанию) сгенерирует восстановленную версию.</p>'
+            + '<p style="color:var(--text-muted);margin-bottom:20px">Загрузите фото разрушенного здания. ИИ (Horde по умолчанию) сгенерирует восстановленную версию.</p>'
             + '<div class="form-grid">'
-            + '<div class="form-group full-width"><label>Фото здания</label>'
-            + '<input type="file" id="rf" accept="image/*"></div>'
-            + '<div class="form-group full-width"><label>Что восстановить?</label>'
-            + '<textarea id="rp" placeholder="достроить крышу, восстановить окна..."></textarea></div>'
-            + '<div class="form-group"><label>Стиль здания</label>'
-            + '<select id="rs">' + opts + '</select></div>'
-            + '</div><button class="btn gothic-btn" id="btn-res">🏗️ Реставрировать</button>'
-            + '<div id="res-area"></div>';
-
+            + '<div class="form-group full-width"><label>Фото здания</label><input type="file" id="rf" accept="image/*"></div>'
+            + '<div class="form-group full-width"><label>Что восстановить?</label><textarea id="rp" placeholder="достроить крышу, восстановить окна..."></textarea></div>'
+            + '<div class="form-group"><label>Стиль здания</label><select id="rs">' + opts + '</select></div>'
+            + '</div><button class="btn gothic-btn" id="btn-res">🏗️ Реставрировать</button><div id="res-area"></div>';
     } else if (page === 'gallery') {
         card.innerHTML = '<h2 class="page-title">🖼️ Галерея</h2>';
         if (STATE.history.length === 0) {
             card.innerHTML += '<p style="text-align:center;padding:40px;color:var(--text-muted)">Галерея пуста!</p>';
         } else {
-            card.innerHTML += '<div style="margin-bottom:20px;text-align:right">'
-                + '<button class="btn btn-secondary" id="btn-clear-all" '
-                + 'style="border-color:var(--error);color:var(--error);padding:8px 16px;font-size:.85rem;min-height:auto">'
-                + '🗑️ Удалить всё</button></div>';
+            card.innerHTML += '<div style="margin-bottom:20px;text-align:right"><button class="btn btn-secondary" id="btn-clear-all" style="border-color:var(--error);color:var(--error);padding:8px 16px;font-size:.85rem;min-height:auto">🗑️ Удалить всё</button></div>';
             var grid = document.createElement('div');
             grid.className = 'gallery-grid';
             for (var k = 0; k < STATE.history.length; k++) {
@@ -474,7 +463,6 @@ function renderPage(page) {
             }
             card.appendChild(grid);
         }
-
     } else if (page === 'learning') {
         var total = STATE.learning.likes + STATE.learning.dislikes;
         var acc = total > 0 ? Math.round(STATE.learning.likes / total * 100) : 0;
@@ -483,27 +471,19 @@ function renderPage(page) {
             + '<div class="stat-card"><div class="stat-value" style="color:var(--success)">' + STATE.learning.likes + '</div>Лайков</div>'
             + '<div class="stat-card"><div class="stat-value" style="color:var(--error)">' + STATE.learning.dislikes + '</div>Дизлайков</div>'
             + '<div class="stat-card"><div class="stat-value" style="color:var(--grad-b)">' + acc + '%</div>Точность</div></div>';
-
     } else {
-        card.innerHTML = '<h2 class="page-title">ℹ️ О проекте</h2>'
-            + '<p><b>Реставратор фасадов</b> — клиентская JS-версия.<br>'
-            + '40 стилей · 4 движка: Horde (по умолчанию для реставрации) + Sana + Flux + Turbo<br>'
-            + '5 вариаций дизайна в настройках ⚙️<br>'
-            + 'Чат поддержки 💬 слева внизу.</p>';
+        card.innerHTML = '<h2 class="page-title">ℹ️ О проекте</h2><p><b>Реставратор фасадов</b> — клиентская JS-версия.<br>40 стилей · 4 движка: Horde + Sana + Flux + Turbo<br>5 вариаций дизайна в настройках ⚙️<br>Чат поддержки 💬 слева внизу.</p>';
     }
-
     main.appendChild(card);
     bindPageEvents();
     bindGalleryEvents();
 }
 
-// ===== РЕЗУЛЬТАТЫ И ЛАЙТБОКС =====
 function showResult(data) {
     var a = document.getElementById('res-area');
-    a.innerHTML = '<div class="result">'
-        + '<img src="' + data.url + '" onclick="openLightbox(0)">'
-        + '<div style="margin-bottom:15px;color:var(--text-muted);font-size:.9rem">'
-        + 'Стиль: <b>' + data.style + '</b> | Модель: <b>' + data.engine + '</b></div>'
+    if (!a) return;
+    a.innerHTML = '<div class="result"><img src="' + data.url + '" onclick="openLightbox(0)">'
+        + '<div style="margin-bottom:15px;color:var(--text-muted);font-size:.9rem">Стиль: <b>' + data.style + '</b> | Модель: <b>' + data.engine + '</b></div>'
         + '<div class="result-actions">'
         + '<button class="btn-like" onclick="handleVote(\'like\')">👍 Нравится</button>'
         + '<button class="btn-dislike" onclick="handleVote(\'dislike\')">👎 Не нравится</button>'
@@ -514,12 +494,11 @@ function showResult(data) {
 
 function showError(msg) {
     var a = document.getElementById('res-area');
-    a.innerHTML = '<div class="result" style="border-color:var(--error)">'
-        + '<div style="font-size:3rem;margin-bottom:15px">⚠️</div>'
+    if (!a) return;
+    a.innerHTML = '<div class="result" style="border-color:var(--error)"><div style="font-size:3rem;margin-bottom:15px">⚠️</div>'
         + '<h3 style="color:var(--error);margin-bottom:10px">Ошибка</h3>'
         + '<p style="color:var(--text-muted);margin-bottom:20px;white-space:pre-line;font-size:.9rem">' + msg + '</p>'
-        + '<div class="result-actions"><button class="btn btn-secondary" '
-        + 'onclick="document.getElementById(\'res-area\').innerHTML=\'\'">✕ Закрыть</button></div></div>';
+        + '<div class="result-actions"><button class="btn btn-secondary" onclick="document.getElementById(\'res-area\').innerHTML=\'\'">✕ Закрыть</button></div></div>';
     a.scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -536,22 +515,26 @@ function handleVote(type) {
 function openLightbox(idx) {
     var item = STATE.history[idx];
     if (!item) return;
-    document.getElementById('lb-img').src = item.url;
-    document.getElementById('lb-info').textContent = (item.style || '') + ' · ' + item.engine;
-    document.getElementById('lightbox-modal').classList.add('active');
+    var img = document.getElementById('lb-img');
+    var info = document.getElementById('lb-info');
+    var modal = document.getElementById('lightbox-modal');
+    if (img) img.src = item.url;
+    if (info) info.textContent = (item.style || '') + ' · ' + item.engine;
+    if (modal) modal.classList.add('active');
 }
 
 function closeLightbox() {
-    document.getElementById('lightbox-modal').classList.remove('active');
-    document.getElementById('lb-img').src = '';
+    var modal = document.getElementById('lightbox-modal');
+    var img = document.getElementById('lb-img');
+    if (modal) modal.classList.remove('active');
+    if (img) img.src = '';
 }
 
-// ===== ГЕНЕРАЦИЯ =====
 async function performGeneration(prompt, styleName) {
     var parts = [prompt];
     if (STYLES[styleName] && STYLES[styleName].length > 0) parts.push(STYLES[styleName]);
     var fullPrompt = parts.join(', ');
-    showLoading('🎨 Генерация... (10-180 сек, horde может быть медленным)');
+    showLoading('🎨 Генерация... (10-180 сек)');
     try {
         var result = await generateWithFallback(fullPrompt, false);
         result.style = styleName;
@@ -559,10 +542,7 @@ async function performGeneration(prompt, styleName) {
         STATE.history.unshift(result);
         if (STATE.history.length > 50) STATE.history = STATE.history.slice(0, 50);
         STATE.learning.generations++;
-        saveState();
-        updateUI();
-        showResult(result);
-        AudioEngine.success();
+        saveState(); updateUI(); showResult(result); AudioEngine.success();
     } catch (e) {
         console.error(e);
         showError(e.message || 'Неизвестная ошибка');
@@ -572,7 +552,6 @@ async function performGeneration(prompt, styleName) {
     }
 }
 
-// ===== ОБРАБОТЧИКИ =====
 function bindPageEvents() {
     var gb = document.getElementById('btn-gen');
     if (gb) {
@@ -591,7 +570,7 @@ function bindPageEvents() {
             var style = document.getElementById('rs').value;
             if (!fi.files || !fi.files[0]) return alert('Загрузите фото');
             if (!desc) return alert('Опишите что восстановить');
-            showLoading('🏗️ Реставрация через Horde... (может занять до 3 минут)');
+            showLoading('🏗️ Реставрация через Horde... (до 3 минут)');
             var reader = new FileReader();
             reader.onload = async function(ev) {
                 try {
@@ -601,10 +580,7 @@ function bindPageEvents() {
                     STATE.history.unshift(r);
                     if (STATE.history.length > 50) STATE.history = STATE.history.slice(0, 50);
                     STATE.learning.generations++;
-                    saveState();
-                    updateUI();
-                    showResult(r);
-                    AudioEngine.success();
+                    saveState(); updateUI(); showResult(r); AudioEngine.success();
                 } catch (err) {
                     console.error(err);
                     showError(err.message || 'Ошибка реставрации');
@@ -626,9 +602,7 @@ function bindGalleryEvents() {
             var idx = parseInt(this.dataset.idx);
             if (confirm('Удалить?')) {
                 STATE.history.splice(idx, 1);
-                saveState();
-                renderPage('gallery');
-                AudioEngine.click();
+                saveState(); renderPage('gallery'); AudioEngine.click();
             }
         });
     }
@@ -637,15 +611,13 @@ function bindGalleryEvents() {
         cb.addEventListener('click', function() {
             if (confirm('Удалить ВСЕ?')) {
                 STATE.history = [];
-                saveState();
-                renderPage('gallery');
-                AudioEngine.error();
+                saveState(); renderPage('gallery'); AudioEngine.error();
             }
         });
     }
 }
 
-// ===== ИНИЦИАЛИЗАЦИЯ =====
+// ===== ИНИЦИАЛИЗАЦИЯ (безопасная) =====
 document.addEventListener('DOMContentLoaded', function() {
     setTheme(STATE.theme);
     setDesign(STATE.design);
@@ -653,12 +625,14 @@ document.addEventListener('DOMContentLoaded', function() {
     renderPage('generate');
 
     var sb = document.getElementById('stars');
-    for (var i = 0; i < 9; i++) {
-        var s = document.createElement('div');
-        s.className = 'star';
-        s.style.left = (5 + i * 10) + '%';
-        s.style.animationDelay = (i * 0.8) + 's';
-        sb.appendChild(s);
+    if (sb) {
+        for (var i = 0; i < 9; i++) {
+            var s = document.createElement('div');
+            s.className = 'star';
+            s.style.left = (5 + i * 10) + '%';
+            s.style.animationDelay = (i * 0.8) + 's';
+            sb.appendChild(s);
+        }
     }
 
     var navBtns = document.querySelectorAll('.nav-btn');
@@ -670,12 +644,12 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     var panel = document.getElementById('settings-panel');
-    document.getElementById('settings-btn').addEventListener('click', function(e) {
+    on('settings-btn', 'click', function(e) {
         e.stopPropagation();
-        panel.classList.toggle('open');
+        if (panel) panel.classList.toggle('open');
     });
     document.addEventListener('click', function(e) {
-        if (!panel.contains(e.target) && e.target.id !== 'settings-btn') {
+        if (panel && !panel.contains(e.target) && e.target.id !== 'settings-btn') {
             panel.classList.remove('open');
         }
     });
@@ -688,80 +662,82 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    document.getElementById('sound-on').checked = STATE.soundEnabled;
-    document.getElementById('sound-on').addEventListener('change', function(e) {
+    var snd = on('sound-on', 'change', function(e) {
         STATE.soundEnabled = e.target.checked;
         saveState();
     });
+    if (snd) snd.checked = STATE.soundEnabled;
 
-    document.getElementById('model-select').value = STATE.selectedModel;
-    document.getElementById('model-select').addEventListener('change', function(e) {
+    var mdl = on('model-select', 'change', function(e) {
         STATE.selectedModel = e.target.value;
         saveState();
         AudioEngine.click();
     });
+    if (mdl) mdl.value = STATE.selectedModel;
 
-    document.getElementById('design-select').value = STATE.design;
-    document.getElementById('design-select').addEventListener('change', function(e) {
+    var dsg = on('design-select', 'change', function(e) {
         setDesign(e.target.value);
         AudioEngine.click();
     });
+    if (dsg) dsg.value = STATE.design;
 
-    document.getElementById('reset-coins').addEventListener('click', function() {
-        STATE.coins = 0;
-        STATE.tea = 0;
-        saveState();
-        updateUI();
-        AudioEngine.click();
+    on('reset-coins', 'click', function() {
+        STATE.coins = 0; STATE.tea = 0;
+        saveState(); updateUI(); AudioEngine.click();
     });
 
     var ham = document.getElementById('hamster');
-    ham.addEventListener('click', function(e) {
-        e.stopPropagation();
-        ham.classList.remove('tap');
-        void ham.offsetWidth;
-        ham.classList.add('tap');
-        STATE.coins++;
-        saveState();
-        updateUI();
-        spawnCoin(e.clientX, e.clientY);
-        AudioEngine.click();
-    });
+    if (ham) {
+        ham.addEventListener('click', function(e) {
+            e.stopPropagation();
+            ham.classList.remove('tap');
+            void ham.offsetWidth;
+            ham.classList.add('tap');
+            STATE.coins++;
+            saveState(); updateUI();
+            spawnCoin(e.clientX, e.clientY);
+            AudioEngine.click();
+        });
+    }
 
-    document.getElementById('lb-close-btn').addEventListener('click', closeLightbox);
-    document.getElementById('lightbox-modal').addEventListener('click', function(e) {
-        if (e.target === document.getElementById('lightbox-modal')) closeLightbox();
-    });
+    on('lb-close-btn', 'click', closeLightbox);
+    var lbm = document.getElementById('lightbox-modal');
+    if (lbm) {
+        lbm.addEventListener('click', function(e) {
+            if (e.target === lbm) closeLightbox();
+        });
+    }
 
-    document.getElementById('teapot-link').addEventListener('click', function(e) {
+    on('teapot-link', 'click', function(e) {
         e.preventDefault();
-        document.getElementById('teapot-modal').classList.add('active');
+        var tm = document.getElementById('teapot-modal');
+        if (tm) tm.classList.add('active');
         STATE.tea++;
-        saveState();
-        updateUI();
+        saveState(); updateUI();
         AudioEngine.whistle();
     });
-    document.getElementById('teapot-close-btn').addEventListener('click', function() {
-        document.getElementById('teapot-modal').classList.remove('active');
+    on('teapot-close-btn', 'click', function() {
+        var tm = document.getElementById('teapot-modal');
+        if (tm) tm.classList.remove('active');
     });
-    document.getElementById('teapot-sound-btn').addEventListener('click', function() {
-        AudioEngine.whistle();
-    });
+    on('teapot-sound-btn', 'click', function() { AudioEngine.whistle(); });
 
     var chatPanel = document.getElementById('chat-panel');
-    document.getElementById('chat-btn').addEventListener('click', function(e) {
+    on('chat-btn', 'click', function(e) {
         e.stopPropagation();
-        chatPanel.classList.toggle('open');
+        if (chatPanel) chatPanel.classList.toggle('open');
     });
-    document.getElementById('chat-close').addEventListener('click', function() {
-        chatPanel.classList.remove('open');
+    on('chat-close', 'click', function() {
+        if (chatPanel) chatPanel.classList.remove('open');
     });
     document.addEventListener('click', function(e) {
-        if (!chatPanel.contains(e.target) && e.target.id !== 'chat-btn') {
+        if (chatPanel && !chatPanel.contains(e.target) && e.target.id !== 'chat-btn') {
             chatPanel.classList.remove('open');
         }
     });
-    chatPanel.addEventListener('click', function(e) { e.stopPropagation(); });
+    if (chatPanel) {
+        chatPanel.addEventListener('click', function(e) { e.stopPropagation(); });
+    }
 
     var chatQs = document.querySelectorAll('.chat-q');
     for (var q = 0; q < chatQs.length; q++) {
