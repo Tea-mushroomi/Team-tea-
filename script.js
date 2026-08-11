@@ -70,7 +70,7 @@ function addDiversity(prompt) {
     return prompt + ', ' + extras.join(', ') + ', unique composition';
 }
 
-// ===== ЦЕНЗОР: вырезаем людей и внешность из промпта =====
+// ===== ЦЕНЗОР: вырезаем людей и внешность =====
 var BANNED_STEMS = [
     'женщин', 'мужчин', 'человек', 'люд', 'девушк', 'девочк', 'мальчик',
     'ребенок', 'ребёнок', 'ребят', 'парень', 'парня', 'парнем',
@@ -85,6 +85,23 @@ var BANNED_STEMS = [
     'sexy', 'fashion'
 ];
 var EXACT_BANNED = ['man', 'men', 'women', 'humans', 'persons', 'kid', 'kids', 'faces', 'figures', 'beauty', 'она', 'он', 'её', 'ее'];
+
+// ===== ДЕТЕКТОР ЛЮДЕЙ (радикальная цензура) =====
+var PERSON_DETECT_STEMS = BANNED_STEMS.concat(['молод', 'кружев', 'плеч', 'груд', 'декольте', 'красот', 'миловид', 'секс', 'обнаж']);
+
+function containsPersonWords(text) {
+    if (!text) return false;
+    var words = (text.toLowerCase() || '').split(/[^a-zа-яё0-9]+/);
+    for (var i = 0; i < words.length; i++) {
+        var w = words[i];
+        if (w.length < 3) continue;
+        if (EXACT_BANNED.indexOf(w) !== -1) return true;
+        for (var s = 0; s < PERSON_DETECT_STEMS.length; s++) {
+            if (w.indexOf(PERSON_DETECT_STEMS[s]) === 0) return true;
+        }
+    }
+    return false;
+}
 
 function sanitizePrompt(text) {
     if (!text) return '';
@@ -488,10 +505,11 @@ async function restoreViaHordeImg2Img(source, prompt) {
     throw new Error('Horde: таймаут');
 }
 
-// ===== РЕСТАВРАЦИЯ (цензура + якорь) =====
+// ===== РЕСТАВРАЦИЯ (радикальная цензура + якорь) =====
 async function restoreBuilding(originalBase64, description, styleName) {
     var styleDesc = STYLES[styleName] || '';
-    var cleanDesc = sanitizePrompt(description);
+    var personDetected = containsPersonWords(description);
+    var cleanDesc = personDetected ? '' : sanitizePrompt(description);
     var descTags = extractEnglishTags(description);
 
     var prompt = [
@@ -562,26 +580,59 @@ var AudioEngine = (function() {
     };
 })();
 
-// ===== ЧАТ ПОДДЕРЖКИ =====
+// ===== ЧАТ ПОДДЕРЖКИ (дружелюбный) =====
 var CHAT_RESPONSES = {
-    generate: "🔧 <b>Генерация:</b><br>• 3 модели стартуют ОДНОВРЕМЕННО<br>• Результат — как только первая готова<br>• Пауза 15 сек между запросами (лимит API)",
-    restore: "🔧 <b>Реставрация:</b><br>• Настоящий img2img через AI Horde<br>• Твоё фото — основа: модель дорисовывает разрушенное<br>• Сохраняет форму и композицию здания",
-    slow: "⚡ <b>Скорость:</b><br>• Гонка моделей: turbo+flux+sana параллельно<br>• Выбери разрешение 640 — быстрее<br>• «Отдых API» — защита от блокировок",
-    diverse: "🎲 <b>Разнообразие:</b><br>• Каждый запрос получает случайные:<br>— время суток и погоду<br>— ракурс камеры<br>— настроение и детали<br>• Одинаковых картинок не бывает!",
-    censor: "🛡️ <b>Цензура:</b><br>• Слова о людях и внешности вырезаются<br>• Люди — только крошечные силуэты вдали<br>• Переводчик-якорь даёт модели английский subject",
-    gallery: "🔧 <b>Галерея:</b><br>• Хранится в localStorage<br>• 🗑️ под картинкой — удалить одну",
-    teapot: "🫖 <b>Своя картинка чайника:</b><br>• Положи teapot.png рядом с index.html<br>• Сайт подхватит его автоматически",
-    emoji: "🔧 <b>Стикеры на ПК:</b><br>• Подключён Noto Color Emoji<br>• Если ч/б — нажми Ctrl+F5",
-    design: "🎭 <b>6 тем + 8 дизайнов + 3 разрешения</b> в настройках ⚙️ — комбинируй!"
+    alisa: "🤖 <b>Промпты от Алисы (Яндекс):</b><br>"
+        + "• К сожалению, часто не работают как задумано 😔<br>"
+        + "• Алиса описывает сцены с людьми, а наш сайт — только про здания<br>"
+        + "• Цензура вырезает людей и рисует здание по тегам<br>"
+        + "• Совет: просите Алису описать <b>здание без людей</b> "
+        + "или вставьте свой промпт — так результат будет лучше 💛",
+    generate: "🌱 <b>Не переживайте, сейчас разберёмся!</b><br>"
+        + "• Генерация занимает 10–60 секунд — это нормально<br>"
+        + "• Если долго — выберите разрешение 640 в настройках ⚙️<br>"
+        + "• Мы запускаем 3 модели одновременно, первая готовая картинка появится сама ✨",
+    restore: "🏗️ <b>Реставрация работает так:</b><br>"
+        + "• Ваше фото — основа, ИИ дорисовывает разрушенное (img2img)<br>"
+        + "• Опишите подробнее, что восстановить — будет точнее<br>"
+        + "• Horde может занять до 3 минут, пожалуйста, подождите 💛",
+    slow: "⏳ <b>Понимаю, ждать обидно! Вот что ускоряет:</b><br>"
+        + "• Разрешение 640 в настройках ⚙️<br>"
+        + "• Модель Turbo — самая быстрая<br>"
+        + "• Пока ждёте — потапкайте хомяка 🐹 и получите монетки!",
+    diverse: "🎲 <b>Каждая картинка уникальна!</b><br>"
+        + "• Мы случайно меняем свет, погоду, ракурс и настроение<br>"
+        + "• Даже с тем же промптом результат будет другим<br>"
+        + "• Нажмите «Создать проект» ещё раз — увидите 🌟",
+    censor: "🛡️ <b>Цензура на страже!</b><br>"
+        + "• Люди вырезаются из промпта автоматически<br>"
+        + "• Разрешены только крошечные силуэты вдали<br>"
+        + "• Если промпт про человека — нарисуем здание вместо него<br>"
+        + "• Так сайт остаётся про архитектуру 🏛️",
+    gallery: "🖼️ <b>Галерея — ваша коллекция!</b><br>"
+        + "• Все работы сохраняются в браузере<br>"
+        + "• 🗑️ под картинкой — удалить одну<br>"
+        + "• Нажмите на картинку, чтобы рассмотреть поближе 🔍",
+    teapot: "🫖 <b>Секретик про чайник:</b><br>"
+        + "• Положите файл teapot.png (или .jpg/.gif) рядом с index.html<br>"
+        + "• И в пасхалке появится ВАША картинка ✨",
+    emoji: "😢 <b>Стикеры серые на ПК?</b><br>"
+        + "• Мы подключили цветные эмодзи Noto Color Emoji<br>"
+        + "• Нажмите Ctrl+F5, чтобы обновить<br>"
+        + "• Или замените эмодзи на свои картинки 🖼️",
+    design: "🎨 <b>Сделайте сайт своим!</b><br>"
+        + "• 6 тем + 8 дизайнов + 3 разрешения = 144 комбинации ✨<br>"
+        + "• Всё в настройках ⚙️"
 };
 
 function handleChatQuestion(key) {
     var msgs = document.getElementById('chat-messages');
     if (!msgs) return;
     var labels = {
-        generate: 'Не генерирует', restore: 'Не реставрирует', slow: 'Долго ждать',
-        diverse: 'Похожие картинки', censor: 'Цензура', gallery: 'Галерея',
-        teapot: 'Картинка чайника', emoji: 'Стикеры на ПК', design: 'Темы и дизайны'
+        alisa: 'Промпт от Алисы', generate: 'Не генерирует', restore: 'Не реставрирует',
+        slow: 'Долго ждать', diverse: 'Похожие картинки', censor: 'Цензура',
+        gallery: 'Галерея', teapot: 'Картинка чайника', emoji: 'Стикеры на ПК',
+        design: 'Темы и дизайны'
     };
     var userMsg = document.createElement('div');
     userMsg.className = 'chat-msg user';
@@ -598,6 +649,7 @@ function handleChatQuestion(key) {
 }
 
 // ===== КОНЕЦ ЧАСТИ 2 ИЗ 3 =====
+
 // =============================================
 // РЕСТАВРАТОР ФАСАДОВ — script.js (часть 3 из 3)
 // =============================================
@@ -794,12 +846,14 @@ function closeLightbox() {
     if (img) img.src = '';
 }
 
-// ===== ГЕНЕРАЦИЯ (цензура + переводчик-якорь) =====
+// ===== ГЕНЕРАЦИЯ (радикальная цензура + якорь) =====
 async function performGeneration(prompt, styleName) {
-    var clean = sanitizePrompt(prompt);
     var tags = extractEnglishTags(prompt);
     if (tags.length === 0) tags = ['building', 'architecture'];
+    var personDetected = containsPersonWords(prompt);
+    var clean = personDetected ? '' : sanitizePrompt(prompt);
     var parts = [tags.join(', '), clean];
+    if (personDetected) parts.push('building only, no people, no person, no figure');
     if (STYLES[styleName] && STYLES[styleName].length > 0) parts.push(STYLES[styleName]);
     var fullPrompt = parts.join(', ');
     showLoading('🎨 Генерация (гонка моделей)...');
