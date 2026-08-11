@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -7,7 +6,7 @@
 <title>🏛️ Реставратор фасадов</title>
 <link rel="stylesheet" href="style.css">
 </head>
-<body data-theme="gothic">
+<body data-theme="gothic" data-design="classic">
 
 <div class="corner-badge"><span>🪙 <b id="coin-num">0</b></span><span>🍵 <b id="tea-num">0</b></span></div>
 
@@ -23,9 +22,20 @@
     <div class="set-row" style="flex-direction:column;align-items:flex-start;gap:4px;margin-top:8px">
         <small style="color:var(--text-dim)">Модель:</small>
         <select id="model-select" style="width:100%;padding:6px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:var(--font)">
+            <option value="horde">Horde (по умолчанию)</option>
             <option value="sana">Sana (новая)</option>
             <option value="flux">Flux (быстрая)</option>
             <option value="turbo">Turbo (самая быстрая)</option>
+        </select>
+    </div>
+    <div class="set-row" style="flex-direction:column;align-items:flex-start;gap:4px;margin-top:8px">
+        <small style="color:var(--text-dim)">Дизайн:</small>
+        <select id="design-select" style="width:100%;padding:6px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:var(--font)">
+            <option value="classic">Классика (готика)</option>
+            <option value="brutal">Брутализм (резкий)</option>
+            <option value="vintage">Винтаж (бумага)</option>
+            <option value="neon">Неон (свечение)</option>
+            <option value="soft">Мягкий (скругления)</option>
         </select>
     </div>
     <button class="btn btn-secondary" id="reset-coins" style="width:100%;margin-top:12px">♻️ Сброс валюты</button>
@@ -89,7 +99,7 @@
     <div class="badges">
         <span class="badge">💻 Pure JS</span>
         <span class="badge">🎨 40 стилей</span>
-        <span class="badge">🧠 Sana + Flux + Turbo</span>
+        <span class="badge">🧠 Horde + Sana + Flux + Turbo</span>
     </div>
 </header>
 
@@ -108,7 +118,7 @@
         <div class="footer-col"><h4>🏛️ Реставратор фасадов</h4><p>JS-версия с ИИ для архитектуры.</p></div>
         <div class="footer-col"><h4>Статистика</h4><p>Генераций: <span id="f-gens">0</span> · 👍 <span id="f-likes">0</span> · 👎 <span id="f-dislikes">0</span></p><p>Точность: <span id="f-acc">0</span>%</p></div>
         <div class="footer-col"><h4>Датасет</h4><p>Стилей: 40</p></div>
-        <div class="footer-col"><h4>Технологии</h4><p>Pollinations · Sana · Flux · Turbo</p><a class="teapot-link" href="#" id="teapot-link">🫖</a></div>
+        <div class="footer-col"><h4>Технологии</h4><p>Horde · Sana · Flux · Turbo</p><a class="teapot-link" href="#" id="teapot-link">🫖</a></div>
     </div>
     <div class="footer-bottom"><p>© 2026 Реставратор фасадов</p></div>
 </footer>
