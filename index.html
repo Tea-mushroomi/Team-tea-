@@ -36,6 +36,14 @@
         </select>
     </div>
     <div class="set-row" style="flex-direction:column;align-items:flex-start;gap:4px;margin-top:8px">
+        <small style="color:var(--text-dim)">Разрешение:</small>
+        <select id="res-select" style="width:100%;padding:6px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:var(--font)">
+            <option value="1024">1024 (макс. качество)</option>
+            <option value="768">768 (баланс)</option>
+            <option value="640">640 (быстро)</option>
+        </select>
+    </div>
+    <div class="set-row" style="flex-direction:column;align-items:flex-start;gap:4px;margin-top:8px">
         <small style="color:var(--text-dim)">Модель:</small>
         <select id="model-select" style="width:100%;padding:6px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:var(--font)">
             <option value="horde">Horde (качественная)</option>
@@ -59,6 +67,7 @@
         <button class="chat-q" data-q="generate">Не генерирует</button>
         <button class="chat-q" data-q="restore">Не реставрирует</button>
         <button class="chat-q" data-q="slow">Долго ждать</button>
+        <button class="chat-q" data-q="diverse">Похожие картинки</button>
         <button class="chat-q" data-q="gallery">Галерея</button>
         <button class="chat-q" data-q="teapot">Картинка чайника</button>
         <button class="chat-q" data-q="emoji">Стикеры на ПК</button>
@@ -130,7 +139,7 @@
         <div class="footer-col"><h4>Датасет</h4><p>Стилей: 40</p></div>
         <div class="footer-col"><h4>Технологии</h4><p>Horde · Sana · Flux · Turbo</p><a class="teapot-link" href="#" id="teapot-link">🫖</a></div>
     </div>
-    <div class="footer-bottom"><p>© 2026 Реставратор фасадов</p></div>
+    <div class="footer-bottom"><p>© 2026 Реставратор фасадов · от чайников с любовью 🫖❤️</p></div>
 </footer>
 
 <script src="script.js"></script>
