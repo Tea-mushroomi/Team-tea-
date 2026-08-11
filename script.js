@@ -1,6 +1,6 @@
+
 // =============================================
 // РЕСТАВРАТОР ФАСАДОВ — script.js (часть 1 из 3)
-// Стили, цензор, состояние, движки
 // =============================================
 
 var STYLES = {
@@ -47,10 +47,10 @@ var STYLES = {
 };
 
 // Усиленная цензура: никаких крупных людей
-var NEGATIVE_PROMPT = "close-up person,foreground person,detailed person,portrait,face,faces,woman,man,girl,boy,lady,gentleman,crowd of people,nsfw,naked,blurry,low quality,deformed,watermark,text,animals";
+var NEGATIVE_PROMPT = "close-up person,foreground person,detailed person,portrait,face,faces,woman,man,girl,boy,lady,gentleman,crowd of people,dress,gown,hair,hairstyle,makeup,nsfw,naked,blurry,low quality,deformed,watermark,text,animals";
 
 // Люди — только крошечными силуэтами вдали
-var BUILDING_BOOST = "architecture only,building exterior,facade,no interior,8k,people only as tiny distant silhouettes far away,no faces visible";
+var BUILDING_BOOST = "architecture only,building exterior,facade,no interior,8k,people only as tiny distant silhouettes far away,no faces visible,no person in dress,no figure in foreground";
 
 // ===== ГЕНЕРАТОР РАЗНООБРАЗИЯ =====
 var DIV_TIME = ['golden hour light', 'soft morning light', 'harsh noon sun', 'blue hour dusk', 'night with warm window lights', 'overcast diffused light'];
@@ -70,15 +70,21 @@ function addDiversity(prompt) {
     return prompt + ', ' + extras.join(', ') + ', unique composition';
 }
 
-// ===== ЦЕНЗОР: вырезаем людей из промпта =====
+// ===== ЦЕНЗОР: вырезаем людей и внешность из промпта =====
 var BANNED_STEMS = [
     'женщин', 'мужчин', 'человек', 'люд', 'девушк', 'девочк', 'мальчик',
     'ребенок', 'ребёнок', 'ребят', 'парень', 'парня', 'парнем',
     'портрет', 'фигур', 'толп', 'лицо', 'лица', 'лицом',
+    'плать', 'юбк', 'блузк', 'волос', 'прическ', 'причёск', 'глаз', 'губ',
+    'ресниц', 'макияж', 'красавиц', 'дама', 'госпож', 'принцесс', 'королев',
+    'богин', 'незнакомк', 'героин', 'актрис', 'модел', 'тело', 'кожа',
+    'сексуальн', 'элегантн', 'прекрасн', 'очаровательн', 'улыба', 'позирует',
     'woman', 'people', 'person', 'human', 'girl', 'boy', 'lady', 'gentleman',
-    'portrait', 'figure', 'crowd', 'face'
+    'portrait', 'figure', 'crowd', 'face', 'dress', 'gown', 'hair',
+    'hairstyle', 'makeup', 'beautiful', 'elegant', 'stunning', 'gorgeous',
+    'sexy', 'fashion'
 ];
-var EXACT_BANNED = ['man', 'men', 'women', 'humans', 'persons', 'kid', 'kids', 'faces', 'figures'];
+var EXACT_BANNED = ['man', 'men', 'women', 'humans', 'persons', 'kid', 'kids', 'faces', 'figures', 'beauty', 'она', 'он', 'её', 'ее'];
 
 function sanitizePrompt(text) {
     if (!text) return '';
@@ -105,6 +111,37 @@ function sanitizePrompt(text) {
         .replace(/([,.!?;:])\s*([,.!?;:])/g, '$1')
         .replace(/^[\s,]+|[\s,]+$/g, '')
         .trim();
+}
+
+// ===== ПЕРЕВОДЧИК-ЯКОРЬ: русские слова → английские теги =====
+var RU_EN_TAGS = [
+    ['здани', 'building'], ['дом', 'house'], ['фасад', 'facade'],
+    ['храм', 'temple'], ['церк', 'church'], ['собор', 'cathedral'],
+    ['башн', 'tower'], ['крыш', 'roof'], ['окн', 'windows'],
+    ['двер', 'door'], ['вход', 'entrance'], ['балкон', 'balcony'],
+    ['колонн', 'columns'], ['арк', 'arches'], ['лестниц', 'stairs'],
+    ['стен', 'walls'], ['этаж', 'storey building'],
+    ['акварель', 'watercolor painting'], ['графит', 'graphite gray tones'],
+    ['сер', 'gray palette'], ['дымк', 'light haze'], ['туман', 'fog'],
+    ['бумаг', 'paper texture'], ['кирпич', 'brick'], ['дерев', 'wooden'],
+    ['бетон', 'concrete'], ['стекл', 'glass'], ['усадьб', 'manor'],
+    ['дворец', 'palace'], ['замок', 'castle'], ['мечет', 'mosque'],
+    ['пагод', 'pagoda'], ['фахверк', 'half-timbered'], ['шале', 'chalet'],
+    ['вилл', 'villa'], ['завод', 'factory'], ['фабрик', 'factory'],
+    ['мост', 'bridge'], ['улиц', 'street'], ['площад', 'square']
+];
+
+function extractEnglishTags(text) {
+    var low = (text || '').toLowerCase();
+    var tags = [];
+    for (var i = 0; i < RU_EN_TAGS.length; i++) {
+        var ru = RU_EN_TAGS[i][0];
+        var en = RU_EN_TAGS[i][1];
+        if (low.indexOf(ru) !== -1 && en && tags.indexOf(en) === -1) {
+            tags.push(en);
+        }
+    }
+    return tags;
 }
 
 // ===== СОСТОЯНИЕ =====
@@ -288,7 +325,6 @@ async function generateViaHorde(prompt) {
 // ===== КОНЕЦ ЧАСТИ 1 ИЗ 3 =====
 // =============================================
 // РЕСТАВРАТОР ФАСАДОВ — script.js (часть 2 из 3)
-// Гонка моделей, реставрация img2img, звук, чат
 // =============================================
 
 // ===== ПАРАЛЛЕЛЬНАЯ ГОНКА МОДЕЛЕЙ =====
@@ -452,9 +488,11 @@ async function restoreViaHordeImg2Img(source, prompt) {
     throw new Error('Horde: таймаут');
 }
 
-// ===== РЕСТАВРАЦИЯ (с цензурой) =====
+// ===== РЕСТАВРАЦИЯ (цензура + якорь) =====
 async function restoreBuilding(originalBase64, description, styleName) {
     var styleDesc = STYLES[styleName] || '';
+    var cleanDesc = sanitizePrompt(description);
+    var descTags = extractEnglishTags(description);
 
     var prompt = [
         'restored building facade',
@@ -464,7 +502,8 @@ async function restoreBuilding(originalBase64, description, styleName) {
         'no damage no cracks no ruins no graffiti',
         'same building same composition',
         'people only as tiny distant silhouettes far away',
-        sanitizePrompt(description),
+        descTags.join(', '),
+        cleanDesc,
         styleDesc,
         'architectural photography'
     ].filter(Boolean).join(', ');
@@ -529,7 +568,7 @@ var CHAT_RESPONSES = {
     restore: "🔧 <b>Реставрация:</b><br>• Настоящий img2img через AI Horde<br>• Твоё фото — основа: модель дорисовывает разрушенное<br>• Сохраняет форму и композицию здания",
     slow: "⚡ <b>Скорость:</b><br>• Гонка моделей: turbo+flux+sana параллельно<br>• Выбери разрешение 640 — быстрее<br>• «Отдых API» — защита от блокировок",
     diverse: "🎲 <b>Разнообразие:</b><br>• Каждый запрос получает случайные:<br>— время суток и погоду<br>— ракурс камеры<br>— настроение и детали<br>• Одинаковых картинок не бывает!",
-    censor: "🛡️ <b>Цензура:</b><br>• Слова о людях вырезаются из промпта<br>• Люди — только крошечные силуэты вдали<br>• Никаких лиц и портретов",
+    censor: "🛡️ <b>Цензура:</b><br>• Слова о людях и внешности вырезаются<br>• Люди — только крошечные силуэты вдали<br>• Переводчик-якорь даёт модели английский subject",
     gallery: "🔧 <b>Галерея:</b><br>• Хранится в localStorage<br>• 🗑️ под картинкой — удалить одну",
     teapot: "🫖 <b>Своя картинка чайника:</b><br>• Положи teapot.png рядом с index.html<br>• Сайт подхватит его автоматически",
     emoji: "🔧 <b>Стикеры на ПК:</b><br>• Подключён Noto Color Emoji<br>• Если ч/б — нажми Ctrl+F5",
@@ -561,7 +600,6 @@ function handleChatQuestion(key) {
 // ===== КОНЕЦ ЧАСТИ 2 ИЗ 3 =====
 // =============================================
 // РЕСТАВРАТОР ФАСАДОВ — script.js (часть 3 из 3)
-// Интерфейс, страницы, инициализация
 // =============================================
 
 var currentPage = 'generate';
@@ -698,7 +736,7 @@ function renderPage(page) {
             + '<div class="stat-card"><div class="stat-value" style="color:var(--error)">' + STATE.learning.dislikes + '</div>Дизлайков</div>'
             + '<div class="stat-card"><div class="stat-value" style="color:var(--grad-b)">' + acc + '%</div>Точность</div></div>';
     } else {
-        card.innerHTML = '<h2 class="page-title">ℹ️ О проекте</h2><p><b>Реставратор фасадов</b> — клиентская JS-версия.<br>40 стилей · 4 движка · 6 тем · 8 дизайнов · 3 разрешения<br>🔨 Реставрация = img2img: твоё фото за основа, ИИ дорисовывает разрушенное<br>🛡️ Цензура: люди только силуэтами вдали<br>🫖 Своя картинка чайника: teapot.png рядом с index.html</p>';
+        card.innerHTML = '<h2 class="page-title">ℹ️ О проекте</h2><p><b>Реставратор фасадов</b> — клиентская JS-версия.<br>40 стилей · 4 движка · 6 тем · 8 дизайнов · 3 разрешения<br>🔨 Реставрация = img2img: твоё фото за основа<br>🛡️ Цензура + переводчик-якорь: люди только силуэтами вдали<br>🫖 Своя картинка чайника: teapot.png рядом с index.html</p>';
     }
     main.appendChild(card);
     bindPageEvents();
@@ -756,9 +794,12 @@ function closeLightbox() {
     if (img) img.src = '';
 }
 
-// ===== ГЕНЕРАЦИЯ (с цензурой промпта) =====
+// ===== ГЕНЕРАЦИЯ (цензура + переводчик-якорь) =====
 async function performGeneration(prompt, styleName) {
-    var parts = [sanitizePrompt(prompt)];
+    var clean = sanitizePrompt(prompt);
+    var tags = extractEnglishTags(prompt);
+    if (tags.length === 0) tags = ['building', 'architecture'];
+    var parts = [tags.join(', '), clean];
     if (STYLES[styleName] && STYLES[styleName].length > 0) parts.push(STYLES[styleName]);
     var fullPrompt = parts.join(', ');
     showLoading('🎨 Генерация (гонка моделей)...');
