@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>🏛️ Реставратор фасадов</title>
 <link rel="stylesheet" href="style.css">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap" rel="stylesheet">
 </head>
 <body data-theme="gothic" data-design="classic">
 
@@ -17,16 +18,9 @@
         <button class="theme-btn" data-theme="gothic">🌙</button>
         <button class="theme-btn" data-theme="mint">🍵</button>
         <button class="theme-btn" data-theme="light">☀️</button>
-    </div>
-    <label class="set-row"><input type="checkbox" id="sound-on" checked> 🔊 Звук</label>
-    <div class="set-row" style="flex-direction:column;align-items:flex-start;gap:4px;margin-top:8px">
-        <small style="color:var(--text-dim)">Модель:</small>
-        <select id="model-select" style="width:100%;padding:6px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:var(--font)">
-            <option value="horde">Horde (по умолчанию)</option>
-            <option value="sana">Sana (новая)</option>
-            <option value="flux">Flux (быстрая)</option>
-            <option value="turbo">Turbo (самая быстрая)</option>
-        </select>
+        <button class="theme-btn" data-theme="amber">🌅</button>
+        <button class="theme-btn" data-theme="ocean">🌊</button>
+        <button class="theme-btn" data-theme="rose">🌸</button>
     </div>
     <div class="set-row" style="flex-direction:column;align-items:flex-start;gap:4px;margin-top:8px">
         <small style="color:var(--text-dim)">Дизайн:</small>
@@ -36,8 +30,22 @@
             <option value="vintage">Винтаж (бумага)</option>
             <option value="neon">Неон (свечение)</option>
             <option value="soft">Мягкий (скругления)</option>
+            <option value="hand">✍️ Рукописный (живой)</option>
+            <option value="retro">📼 Ретро (сканлайны)</option>
+            <option value="minimal">⬜ Минимал (строгий)</option>
         </select>
     </div>
+    <div class="set-row" style="flex-direction:column;align-items:flex-start;gap:4px;margin-top:8px">
+        <small style="color:var(--text-dim)">Модель:</small>
+        <select id="model-select" style="width:100%;padding:6px;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:var(--font)">
+            <option value="horde">Horde (качественная)</option>
+            <option value="turbo">Turbo (быстрая)</option>
+            <option value="flux">Flux (баланс)</option>
+            <option value="sana">Sana (новая)</option>
+        </select>
+    </div>
+    <label class="set-row"><input type="checkbox" id="fast-mode" checked> ⚡ Быстрый режим</label>
+    <label class="set-row"><input type="checkbox" id="sound-on" checked> 🔊 Звук</label>
     <button class="btn btn-secondary" id="reset-coins" style="width:100%;margin-top:12px">♻️ Сброс валюты</button>
 </div>
 
@@ -50,12 +58,11 @@
     <div class="chat-quick" id="chat-quick">
         <button class="chat-q" data-q="generate">Не генерирует</button>
         <button class="chat-q" data-q="restore">Не реставрирует</button>
+        <button class="chat-q" data-q="slow">Долго ждать</button>
         <button class="chat-q" data-q="gallery">Галерея</button>
-        <button class="chat-q" data-q="footer">Подвал глючит</button>
-        <button class="chat-q" data-q="hamster">Хомяк</button>
-        <button class="chat-q" data-q="teapot">Где чайник?</button>
-        <button class="chat-q" data-q="slow">Медленно</button>
-        <button class="chat-q" data-q="styles">Стили</button>
+        <button class="chat-q" data-q="teapot">Картинка чайника</button>
+        <button class="chat-q" data-q="emoji">Стикеры на ПК</button>
+        <button class="chat-q" data-q="design">Темы и дизайны</button>
     </div>
 </div>
 
@@ -71,6 +78,7 @@
     <div class="loading-box">
         <div class="hamster-wheel"><div class="wheel"></div><div class="hamster" id="hamster">🐹</div></div>
         <div class="loading-text" id="loading-text">🐹 Генерируем здание...</div>
+        <div class="loading-timer" id="loading-timer"></div>
         <div class="loading-hint">Тапай хомяка — получай монеты 🪙</div>
     </div>
 </div>
@@ -86,7 +94,8 @@
 <div class="teapot-modal" id="teapot-modal">
     <div class="teapot-box">
         <button class="teapot-close-btn" id="teapot-close-btn">×</button>
-        <div style="font-size:100px">🫖</div>
+        <img id="teapot-img" alt="" style="display:none;width:140px;height:140px;object-fit:contain;margin:0 auto 10px;border-radius:12px">
+        <div id="teapot-emoji" style="font-size:100px">🫖</div>
         <h2>418 — Я чайник!</h2>
         <p>+1 🍵 чайный пакетик!</p>
         <button class="btn gothic-btn" id="teapot-sound-btn">🔊 Звук</button>
@@ -99,7 +108,8 @@
     <div class="badges">
         <span class="badge">💻 Pure JS</span>
         <span class="badge">🎨 40 стилей</span>
-        <span class="badge">🧠 Horde + Sana + Flux + Turbo</span>
+        <span class="badge">🧠 4 движка</span>
+        <span class="badge">🎭 8 дизайнов</span>
     </div>
 </header>
 
