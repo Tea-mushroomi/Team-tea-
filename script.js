@@ -909,10 +909,53 @@ function handleChatQuestion(key) {
 }
 
 // ===== КОНЕЦ ЧАСТИ 2 ИЗ 3 =====
-// РЕСТАВРАТОР ФАСАДОВ — script.js (часть 3 из 3)
+// =============================================
+// РЕСТАВРАТОР ФАСАДОВ — script.js (часть 3 из 4)
+// Чайник, темы, интерфейс, страницы
 // =============================================
 
 var currentPage = 'generate';
+
+// ===== ЛЕТАЮЩИЙ ЧАЙНИК =====
+function flyTeapot() {
+    var el = document.getElementById('flying-teapot');
+    if (!el) return;
+
+    // Своя картинка чайника или эмодзи
+    if (teapotCustomUrl) {
+        if (!el.querySelector('img')) {
+            el.innerHTML = '<img src="' + teapotCustomUrl + '" alt="">';
+        }
+    } else if (el.querySelector('img')) {
+        el.textContent = '🫖';
+    }
+
+    var startY = 10 + Math.random() * 70;
+    var dur = 2200 + Math.random() * 1200;
+    var dir = Math.random() < 0.5 ? 1 : -1;
+    var size = 44 + Math.random() * 40;
+    var vw = window.innerWidth;
+    var fromX = dir === 1 ? -160 : vw + 160;
+    var toX = dir === 1 ? vw + 160 : -160;
+    var midX = Math.round((fromX + toX) / 2);
+    var rot = dir === 1 ? 360 : -360;
+
+    el.style.fontSize = size + 'px';
+    el.style.top = startY + '%';
+    el.style.opacity = '1';
+
+    if (el.animate) {
+        el.animate([
+            { transform: 'translateX(' + fromX + 'px) rotate(0deg)', opacity: 0 },
+            { transform: 'translateX(' + Math.round(fromX + (midX - fromX) * 0.3) + 'px) translateY(-10px) rotate(' + Math.round(rot * 0.3) + 'deg)', opacity: 1, offset: 0.3 },
+            { transform: 'translateX(' + midX + 'px) translateY(-50px) rotate(' + Math.round(rot * 0.5) + 'deg)', opacity: 1, offset: 0.5 },
+            { transform: 'translateX(' + toX + 'px) rotate(' + rot + 'deg)', opacity: 0 }
+        ], { duration: dur, easing: 'ease-in-out' });
+    }
+
+    clearTimeout(el._hideT);
+    el._hideT = setTimeout(function() { el.style.opacity = '0'; }, dur);
+}
 
 function setTheme(name) {
     STATE.theme = name;
@@ -922,12 +965,14 @@ function setTheme(name) {
     for (var i = 0; i < btns.length; i++) {
         btns[i].classList.toggle('active', btns[i].dataset.theme === name);
     }
+    flyTeapot();
 }
 
 function setDesign(name) {
     STATE.design = name;
     saveState();
     document.body.dataset.design = name;
+    flyTeapot();
 }
 
 function updateUI() {
@@ -1011,7 +1056,7 @@ function renderPage(page) {
             + '</div><button class="btn gothic-btn" id="btn-gen">🎲 Создать проект</button><div id="res-area"></div>';
     } else if (page === 'restore') {
         card.innerHTML = '<h2 class="page-title">🔨 Реставрация фасада</h2>'
-            + '<p style="color:var(--text-muted);margin-bottom:20px">Загрузите фото разрушенного здания. ИИ возьмёт его за основу и дорисует утраченные части (img2img).</p>'
+            + '<p style="color:var(--text-muted);margin-bottom:20px">Загрузите фото разрушенного здания. ИИ найдёт контуры и дорисует утраченные части (img2img).</p>'
             + '<div class="form-grid">'
             + '<div class="form-group full-width"><label>Фото здания</label><input type="file" id="rf" accept="image/*"></div>'
             + '<div class="form-group full-width"><label>Что восстановить?</label><textarea id="rp" placeholder="достроить крышу, восстановить окна..."></textarea></div>'
@@ -1046,7 +1091,7 @@ function renderPage(page) {
             + '<div class="stat-card"><div class="stat-value" style="color:var(--error)">' + STATE.learning.dislikes + '</div>Дизлайков</div>'
             + '<div class="stat-card"><div class="stat-value" style="color:var(--grad-b)">' + acc + '%</div>Точность</div></div>';
     } else {
-        card.innerHTML = '<h2 class="page-title">ℹ️ О проекте</h2><p><b>Реставратор фасадов</b> — клиентская JS-версия.<br>40 стилей · 4 движка · 6 тем · 8 дизайнов · 3 разрешения<br>🔨 Реставрация = img2img: твоё фото за основа<br>🛡️ Цензура + переводчик-якорь: люди только силуэтами вдали<br>🫖 Своя картинка чайника: teapot.png рядом с index.html</p>';
+        card.innerHTML = '<h2 class="page-title">ℹ️ О проекте</h2><p><b>Реставратор фасадов</b> — клиентская JS-версия.<br>40 стилей · 4 движка · 6 тем · 8 дизайнов · 3 разрешения<br>🔨 Реставрация: контуры здания + img2img<br>🛡️ Цензура: люди только силуэтами вдали<br>🫖 Летающий чайник и своя картинка: teapot.png рядом с index.html</p>';
     }
     main.appendChild(card);
     bindPageEvents();
@@ -1104,8 +1149,15 @@ function closeLightbox() {
     if (img) img.src = '';
 }
 
-// ===== ГЕНЕРАЦИЯ (радикальная цензура + якорь) =====
+// ===== КОНЕЦ ЧАСТИ 3 ИЗ 4 =====
+// =============================================
+// РЕСТАВРАТОР ФАСАДОВ — script.js (часть 4 из 4)
+// Генерация, обработчики, инициализация
+// =============================================
+
+// ===== ГЕНЕРАЦИЯ (цензура + якорь + чайник летит) =====
 async function performGeneration(prompt, styleName) {
+    flyTeapot();
     var tags = extractEnglishTags(prompt);
     if (tags.length === 0) tags = ['building', 'architecture'];
     var personDetected = containsPersonWords(prompt);
@@ -1151,7 +1203,8 @@ function bindPageEvents() {
             var style = document.getElementById('rs').value;
             if (!fi.files || !fi.files[0]) return alert('Загрузите фото');
             if (!desc) return alert('Опишите что восстановить');
-            showLoading('🏗️ Реставрация (img2img, до 3 минут)...');
+            flyTeapot();
+            showLoading('🏗️ Реставрация (ищем контуры, до 3 минут)...');
             var reader = new FileReader();
             reader.onload = async function(ev) {
                 try {
@@ -1205,6 +1258,9 @@ document.addEventListener('DOMContentLoaded', function() {
     updateUI();
     renderPage('generate');
 
+    // Чайник приветствует при входе на сайт
+    setTimeout(flyTeapot, 600);
+
     var sb = document.getElementById('stars');
     if (sb) {
         for (var i = 0; i < 9; i++) {
@@ -1244,13 +1300,13 @@ document.addEventListener('DOMContentLoaded', function() {
     var dsg = on('design-select', 'change', function(e) { setDesign(e.target.value); AudioEngine.click(); });
     if (dsg) dsg.value = STATE.design;
 
-    var rsz = on('res-select', 'change', function(e) { STATE.resolution = e.target.value; saveState(); AudioEngine.click(); });
+    var rsz = on('res-select', 'change', function(e) { STATE.resolution = e.target.value; saveState(); AudioEngine.click(); flyTeapot(); });
     if (rsz) rsz.value = STATE.resolution;
 
-    var mdl = on('model-select', 'change', function(e) { STATE.selectedModel = e.target.value; saveState(); AudioEngine.click(); });
+    var mdl = on('model-select', 'change', function(e) { STATE.selectedModel = e.target.value; saveState(); AudioEngine.click(); flyTeapot(); });
     if (mdl) mdl.value = STATE.selectedModel;
 
-    var fst = on('fast-mode', 'change', function(e) { STATE.fastMode = e.target.checked; saveState(); });
+    var fst = on('fast-mode', 'change', function(e) { STATE.fastMode = e.target.checked; saveState(); flyTeapot(); });
     if (fst) fst.checked = STATE.fastMode;
 
     var snd = on('sound-on', 'change', function(e) { STATE.soundEnabled = e.target.checked; saveState(); });
@@ -1290,6 +1346,7 @@ document.addEventListener('DOMContentLoaded', function() {
         STATE.tea++;
         saveState(); updateUI();
         AudioEngine.whistle();
+        flyTeapot();
     });
     on('teapot-close-btn', 'click', function() {
         var tm = document.getElementById('teapot-modal');
@@ -1315,3 +1372,4 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ===== КОНЕЦ ФАЙЛА =====
+
