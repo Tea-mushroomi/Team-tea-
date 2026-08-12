@@ -158,3 +158,6 @@ body[data-design="minimal"] .badge{background:none}
 body[data-design="minimal"] .gothic-btn{box-shadow:none}
 
 @media(max-width:768px){.form-grid{grid-template-columns:1fr}.gothic-arch{padding:15px 30px}.btn{width:100%}.footer-grid{grid-template-columns:1fr}.nav-btn{padding:8px 10px;font-size:.85rem}.chat-panel{width:calc(100vw - 36px);left:18px;right:18px}}
+/* ===== ЛЕТАЮЩИЙ ЧАЙНИК ===== */
+#flying-teapot{position:fixed;left:0;top:20%;z-index:2500;font-size:56px;line-height:1;pointer-events:none;opacity:0;filter:drop-shadow(0 4px 10px rgba(0,0,0,.45));will-change:transform,opacity}
+#flying-teapot img{width:64px;height:64px;object-fit:contain;display:block}
