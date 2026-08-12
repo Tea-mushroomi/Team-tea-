@@ -1,6 +1,7 @@
 
 // =============================================
-// РЕСТАВРАТОР ФАСАДОВ — script.js (часть 1 из 3)
+// РЕСТАВРАТОР ФАСАДОВ — часть 1 из 4
+// Стили, цензура, переводчик, состояние, движки
 // =============================================
 
 var STYLES = {
@@ -339,182 +340,10 @@ async function generateViaHorde(prompt) {
     throw new Error('Horde: таймаут');
 }
 
-// ===== КОНЕЦ ЧАСТИ 1 ИЗ 3 =====
+// ===== КОНЕЦ ЧАСТИ 1 =====
 // =============================================
-//             var max = 512;
-            var r = Math.min(max / w, max / h, 1);
-            w = Math.max(64, Math.round((w * r) / 64) * 64);
-            h = Math.max(64, Math.round((h * r) / 64) * 64);
-            var c = document.createElement('canvas');
-            c.width = w; c.height = h;
-            c.getContext('2d').drawImage(img, 0, 0, w, h);
-            resolve({
-                base64: c.toDataURL('image/jpeg', 0.85).split(',')[1],
-                width: w,
-                height: h
-            });
-        };
-        img.onerror = function() { resolve(null); };
-        img.src = base64Data;
-    });
-}
-
-// ===== СОХРАНЕНИЕ РЕЗУЛЬТАТА =====
-async function urlToStored(url) {
-    try {
-        var res = await fetch(url);
-        if (!res.ok) throw new Error('http');
-        var blob = await res.blob();
-        var dataUrl = await blobToDataUrl(blob);
-        return await downscale(dataUrl, 800);
-    } catch (e) {
-        return url;
-    }
-}
-
-// ===== НАСТОЯЩАЯ РЕСТАВРАЦИЯ: img2img =====
-async function restoreViaHordeImg2Img(source, prompt) {
-    var postResponse = await fetch('https://aihorde.net/api/v2/generate/async', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': '0000000000' },
-        body: JSON.stringify({
-            prompt: prompt + ', high quality, detailed',
-            params: {
-                width: source.width,
-                height: source.height,
-                steps: 18,
-                n: 1,
-                denoising_strength: 0.6,
-                cfg_scale: 7
-            },
-            source_image: source.base64,
-            source_processing: 'img2img',
-            models: ['stable_diffusion_2.1'],
-            nsfw: false
-        })
-    });
-    if (!postResponse.ok) throw new Error('Horde HTTP ' + postResponse.status);
-    var postData = await postResponse.json();
-    var jobId = postData.id;
-    if (!jobId) throw new Error('Horde: нет id задачи');
-
-    for (var attempt = 0; attempt < 60; attempt++) {
-        await sleep(3000);
-        var checkResponse = await fetch('https://aihorde.net/api/v2/generate/check/' + jobId);
-        var checkData = await checkResponse.json();
-        if (checkData.faulted) throw new Error('Horde: задача сломалась');
-        if (checkData.done) {
-            var statusResponse = await fetch('https://aihorde.net/api/v2/generate/status/' + jobId);
-            var statusData = await statusResponse.json();
-            if (statusData.generations && statusData.generations.length > 0 && statusData.generations[0].img) {
-                var stored = await urlToStored(statusData.generations[0].img);
-                return { url: stored, engine: 'horde-img2img' };
-            }
-            throw new Error('Horde: нет результата');
-        }
-    }
-    throw new Error('Horde: таймаут');
-}
-
-// ===== РЕСТАВРАЦИЯ (радикальная цензура + якорь) =====
-async function restoreBuilding(originalBase64, description, styleName) {
-    var styleDesc = STYLES[styleName] || '';
-    var personDetected = containsPersonWords(description);
-    var cleanDesc = personDetected ? '' : sanitizePrompt(description);
-    var descTags = extractEnglishTags(description);
-
-    var prompt = [
-        'restored building facade',
-        'repaired walls',
-        'intact complete windows with glass',
-        'clean restored facade',
-        'no damage no cracks no ruins no graffiti',
-        'same building same composition',
-        'people only as tiny distant silhouettes far away',
-        descTags.join(', '),
-        cleanDesc,
-        styleDesc,
-        'architectural photography'
-    ].filter(Boolean).join(', ');
-
-    // 1) Настоящий img2img: твоё фото = основа
-    var source = await prepareSourceBase64(originalBase64);
-    if (source) {
-        try {
-            return await restoreViaHordeImg2Img(source, prompt);
-        } catch (e) {
-            console.warn('img2img не сработал, запасной вариант:', e.message);
-        }
-    }
-
-    // 2) Запасной: генерация по тексту с анализом цветов фото
-    var analysis = await analyzeImage(originalBase64);
-    return await smartGenerate(prompt + ', ' + analysis, false);
-}
-
-// ===== ЗВУК =====
-var AudioEngine = (function() {
-    var audioCtx = null;
-    function getCtx() {
-        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        return audioCtx;
-    }
-    function playTone(freq, type, duration, volume) {
-        if (!STATE.soundEnabled) return;
-        try {
-            var c = getCtx(), osc = c.createOscillator(), gain = c.createGain();
-            osc.type = type;
-            osc.frequency.setValueAtTime(freq, c.currentTime);
-            gain.gain.setValueAtTime(volume || 0.1, c.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + duration);
-            osc.connect(gain); gain.connect(c.destination);
-            osc.start(); osc.stop(c.currentTime + duration);
-        } catch (e) {}
-    }
-    return {
-        click: function() { playTone(800 + Math.random() * 400, 'sine', 0.08, 0.05); },
-        success: function() { playTone(523, 'triangle', 0.3); setTimeout(function() { playTone(659, 'triangle', 0.4); }, 150); },
-        error: function() { playTone(150, 'sawtooth', 0.5, 0.15); },
-        whistle: function() {
-            if (!STATE.soundEnabled) return;
-            try {
-                var c = getCtx(), o = c.createOscillator(), g = c.createGain();
-                o.frequency.setValueAtTime(880, c.currentTime);
-                o.frequency.exponentialRampToValueAtTime(1760, c.currentTime + 0.4);
-                g.gain.setValueAtTime(0.001, c.currentTime);
-                g.gain.linearRampToValueAtTime(0.3, c.currentTime + 0.1);
-                g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 1.2);
-                o.connect(g); g.connect(c.destination);
-                o.start(); o.stop(c.currentTime + 1.3);
-            } catch (e) {}
-        }
-    };
-})();
-
-// ===== ЧАТ ПОДДЕРЖКИ (дружелюбный) =====
-var CHAT_RESPONSES = {
-    alisa: "🤖 <b>Промпты от Алисы (Яндекс):</b><br>"
-        + "• К сожалению, часто не работают как задумано 😔<br>"
-        + "• Алиса описывает сцены с людьми, а наш сайт — только про здания<br>"
-        + "• Цензура вырезает людей и рисует здание по тегам<br>"
-        + "• Совет: просите Алису описать <b>здание без людей</b> "
-        + "или вставьте свой промпт — так результат будет лучше 💛",
-    generate: "🌱 <b>Не переживайте, сейчас разберёмся!</b><br>"
-        + "• Генерация занимает 10–60 секунд — это нормально<br>"
-        + "• Если долго — выберите разрешение 640 в настройках ⚙️<br>"
-        + "• Мы запускаем 3 модели одновременно, первая готовая картинка появится сама ✨",
-    restore: "🏗️ <b>Реставрация работает так:</b><br>"
-        + "• Ваше фото — основа, ИИ дорисовывает разрушенное (img2img)<br>"
-        + "• Опишите подробнее, что восстановить — будет точнее<br>"
-        + "• Horde может занять до 3 минут, пожалуйста, подождите 💛",
-    slow: "⏳ <b>Понимаю, ждать обидно! Вот что ускоряет:</b><br>"
-        + "• Разрешение 640 в настройках ⚙️<br>"
-
-// =============================================
-
-        // =============================================
-// РЕСТАВРАТОР ФАСАДОВ — script.js (часть 2 из 3)
-// Контуры здания + реставрация + дружелюбный чат
+// РЕСТАВРАТОР ФАСАДОВ — часть 2 из 4
+// Гонка моделей, контуры, реставрация, звук, чат
 // =============================================
 
 // ===== ПАРАЛЛЕЛЬНАЯ ГОНКА МОДЕЛЕЙ =====
@@ -597,8 +426,6 @@ function analyzeImage(base64Data) {
 }
 
 // ===== РАСПОЗНАВАНИЕ КОНТУРОВ ЗДАНИЯ =====
-// Ищет границы (Собель), считает этажи и окна, определяет крышу и симметрию.
-// Превращает контуры в текстовый запрос для движков.
 function detectBuildingContours(base64Data) {
     return new Promise(function(resolve) {
         var img = new Image();
@@ -611,13 +438,11 @@ function detectBuildingContours(base64Data) {
                 ctx.drawImage(img, 0, 0, W, H);
                 var d = ctx.getImageData(0, 0, W, H).data;
 
-                // яркость каждого пикселя
                 var gray = [];
                 for (var i = 0; i < W * H; i++) {
                     gray.push(0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]);
                 }
 
-                // сила границ по строкам и столбцам
                 var rowEdge = new Array(H).fill(0);
                 var colEdge = new Array(W).fill(0);
                 for (var y = 1; y < H - 1; y++) {
@@ -634,7 +459,6 @@ function detectBuildingContours(base64Data) {
                     }
                 }
 
-                // этажи: горизонтальные линии в средней зоне
                 var midRows = rowEdge.slice(Math.floor(H * 0.25), Math.floor(H * 0.9));
                 var avgRow = midRows.reduce(function(a, b) { return a + b; }, 0) / midRows.length;
                 var floors = 1, above = false;
@@ -644,7 +468,6 @@ function detectBuildingContours(base64Data) {
                 }
                 if (floors > 6) floors = 6;
 
-                // окна: вертикальные линии
                 var avgCol = colEdge.reduce(function(a, b) { return a + b; }, 0) / W;
                 var winCols = 0; above = false;
                 for (var x2 = 0; x2 < W; x2++) {
@@ -652,13 +475,11 @@ function detectBuildingContours(base64Data) {
                     else if (colEdge[x2] < avgCol) above = false;
                 }
 
-                // крыша: границы в верхней четверти
                 var topEdge = 0;
                 for (var y3 = 0; y3 < Math.floor(H * 0.3); y3++) topEdge += rowEdge[y3];
                 var topAvg = topEdge / Math.max(1, Math.floor(H * 0.3));
                 var roof = topAvg > avgRow * 1.2 ? 'pointed roof' : 'flat roof';
 
-                // симметрия фасада
                 var symDiff = 0, symSum = 0;
                 for (var y4 = 0; y4 < H; y4++) {
                     for (var x4 = 0; x4 < Math.floor(W / 2); x4++) {
@@ -668,7 +489,6 @@ function detectBuildingContours(base64Data) {
                 }
                 var symmetric = (symDiff / Math.max(1, symSum)) < 0.25;
 
-                // контуры → текстовый запрос
                 var tags = [floors + ' storey building', roof, 'clear building outline'];
                 if (winCols >= 3) tags.push('row of ' + winCols + ' windows');
                 if (symmetric) tags.push('symmetrical facade');
@@ -771,7 +591,6 @@ async function restoreBuilding(originalBase64, description, styleName) {
     var cleanDesc = personDetected ? '' : sanitizePrompt(description);
     var descTags = extractEnglishTags(description);
 
-    // Распознаём контуры здания и превращаем их в запрос
     var contourTags = await detectBuildingContours(originalBase64);
 
     var prompt = [
@@ -789,7 +608,6 @@ async function restoreBuilding(originalBase64, description, styleName) {
         'architectural photography'
     ].filter(Boolean).join(', ');
 
-    // 1) Настоящий img2img: твоё фото = основа
     var source = await prepareSourceBase64(originalBase64);
     if (source) {
         try {
@@ -799,7 +617,6 @@ async function restoreBuilding(originalBase64, description, styleName) {
         }
     }
 
-    // 2) Запасной: контуры + текст идут в Sana/Flux/Turbo/Horde
     var analysis = await analyzeImage(originalBase64);
     return await smartGenerate(prompt + ', ' + analysis, false);
 }
@@ -869,7 +686,7 @@ var CHAT_RESPONSES = {
     censor: "🛡️ <b>Наш сайт — про здания!</b><br>"
         + "• Если в тексте есть люди, программа их убирает<br>"
         + "• Вместо людей рисует здание<br>"
-        + "• Разрешены только маленькие силуэты далеко-далеко 🏃‍♂️→🔍",
+        + "• Разрешены только маленькие силуэты далеко-далеко",
     gallery: "🖼️ <b>Это твой альбом!</b><br>"
         + "• Все картинки сохраняются на твоём устройстве<br>"
         + "• 🗑️ — удалить одну, «Удалить всё» — очистить альбом<br>"
@@ -908,9 +725,9 @@ function handleChatQuestion(key) {
     }, 300);
 }
 
-// ===== КОНЕЦ ЧАСТИ 2 ИЗ 3 =====
+// ===== КОНЕЦ ЧАСТИ 2 =====
 // =============================================
-// РЕСТАВРАТОР ФАСАДОВ — script.js (часть 3 из 4)
+// РЕСТАВРАТОР ФАСАДОВ — часть 3 из 4
 // Чайник, темы, интерфейс, страницы
 // =============================================
 
@@ -921,7 +738,6 @@ function flyTeapot() {
     var el = document.getElementById('flying-teapot');
     if (!el) return;
 
-    // Своя картинка чайника или эмодзи
     if (teapotCustomUrl) {
         if (!el.querySelector('img')) {
             el.innerHTML = '<img src="' + teapotCustomUrl + '" alt="">';
@@ -1149,9 +965,9 @@ function closeLightbox() {
     if (img) img.src = '';
 }
 
-// ===== КОНЕЦ ЧАСТИ 3 ИЗ 4 =====
+// ===== КОНЕЦ ЧАСТИ 3 =====
 // =============================================
-// РЕСТАВРАТОР ФАСАДОВ — script.js (часть 4 из 4)
+// РЕСТАВРАТОР ФАСАДОВ — часть 4 из 4
 // Генерация, обработчики, инициализация
 // =============================================
 
@@ -1372,4 +1188,3 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ===== КОНЕЦ ФАЙЛА =====
-
