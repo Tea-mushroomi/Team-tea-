@@ -341,96 +341,7 @@ async function generateViaHorde(prompt) {
 
 // ===== КОНЕЦ ЧАСТИ 1 ИЗ 3 =====
 // =============================================
-// РЕСТАВРАТОР ФАСАДОВ — script.js (часть 2 из 3)
-// =============================================
-
-// ===== ПАРАЛЛЕЛЬНАЯ ГОНКА МОДЕЛЕЙ =====
-function raceModels(prompt, models) {
-    return new Promise(function(resolve, reject) {
-        var pending = models.length;
-        var errors = [];
-        var settled = false;
-        models.forEach(function(model) {
-            generateViaPollinations(prompt, model)
-                .then(function(result) {
-                    if (!settled) { settled = true; resolve(result); }
-                })
-                .catch(function(e) {
-                    errors.push(model + ': ' + (e.message || 'ошибка'));
-                    pending--;
-                    if (pending === 0 && !settled) {
-                        settled = true;
-                        reject(new Error(errors.join('\n')));
-                    }
-                });
-        });
-    });
-}
-
-// ===== УМНАЯ ГЕНЕРАЦИЯ =====
-async function smartGenerate(prompt, preferHorde) {
-    await waitCooldown();
-    var diverse = addDiversity(prompt);
-    var errors = [];
-
-    if (STATE.selectedModel === 'horde' && !STATE.fastMode) {
-        try { return await generateViaHorde(diverse); }
-        catch (e) { errors.push('horde: ' + e.message); }
-    }
-
-    try {
-        return await raceModels(diverse, ['turbo', 'flux', 'sana']);
-    } catch (e) {
-        errors.push(e.message);
-    }
-
-    try { return await generateViaHorde(diverse); }
-    catch (e) { errors.push('horde: ' + e.message); }
-
-    throw new Error('Все модели недоступны:\n' + errors.join('\n') + '\n\nПодождите 15 секунд и попробуйте снова.');
-}
-
-// ===== АНАЛИЗ ФОТО (запасной вариант) =====
-function analyzeImage(base64Data) {
-    return new Promise(function(resolve) {
-        var img = new Image();
-        img.onload = function() {
-            var canvas = document.createElement('canvas');
-            canvas.width = 32; canvas.height = 32;
-            var ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, 32, 32);
-            var pixels = ctx.getImageData(0, 0, 32, 32).data;
-            var totalR = 0, totalG = 0, totalB = 0, count = 0;
-            for (var i = 0; i < pixels.length; i += 4) {
-                totalR += pixels[i]; totalG += pixels[i + 1]; totalB += pixels[i + 2]; count++;
-            }
-            var avgR = Math.round(totalR / count);
-            var avgG = Math.round(totalG / count);
-            var avgB = Math.round(totalB / count);
-            var lum = 0.299 * avgR + 0.587 * avgG + 0.114 * avgB;
-            var tone = 'soft natural light';
-            if (lum < 90) tone = 'dark moody atmosphere';
-            else if (lum > 170) tone = 'bright daylight';
-            var hue = 'gray weathered stone';
-            if (avgR > avgG + 20 && avgR > avgB + 20) hue = 'reddish brick walls';
-            else if (avgG > avgR + 10 && avgG > avgB + 10) hue = 'greenish overgrown facade';
-            else if (avgB > avgR + 10 && avgB > avgG + 10) hue = 'bluish stone facade';
-            else if (avgR > 150 && avgG > 130 && avgB < 100) hue = 'warm yellow plaster walls';
-            resolve(tone + ', ' + hue + ', aged texture, weathered surface');
-        };
-        img.onerror = function() { resolve('old building, weathered facade, aged texture'); };
-        img.src = base64Data;
-    });
-}
-
-// ===== ПОДГОТОВКА ФОТО ДЛЯ IMG2IMG =====
-function prepareSourceBase64(base64Data) {
-    return new Promise(function(resolve) {
-        var img = new Image();
-        img.onload = function() {
-            var w = img.naturalWidth, h = img.naturalHeight;
-            if (!w || !h) { resolve(null); return; }
-            var max = 512;
+//             var max = 512;
             var r = Math.min(max / w, max / h, 1);
             w = Math.max(64, Math.round((w * r) / 64) * 64);
             h = Math.max(64, Math.round((h * r) / 64) * 64);
@@ -598,31 +509,380 @@ var CHAT_RESPONSES = {
         + "• Horde может занять до 3 минут, пожалуйста, подождите 💛",
     slow: "⏳ <b>Понимаю, ждать обидно! Вот что ускоряет:</b><br>"
         + "• Разрешение 640 в настройках ⚙️<br>"
-        + "• Модель Turbo — самая быстрая<br>"
-        + "• Пока ждёте — потапкайте хомяка 🐹 и получите монетки!",
-    diverse: "🎲 <b>Каждая картинка уникальна!</b><br>"
-        + "• Мы случайно меняем свет, погоду, ракурс и настроение<br>"
-        + "• Даже с тем же промптом результат будет другим<br>"
-        + "• Нажмите «Создать проект» ещё раз — увидите 🌟",
-    censor: "🛡️ <b>Цензура на страже!</b><br>"
-        + "• Люди вырезаются из промпта автоматически<br>"
-        + "• Разрешены только крошечные силуэты вдали<br>"
-        + "• Если промпт про человека — нарисуем здание вместо него<br>"
-        + "• Так сайт остаётся про архитектуру 🏛️",
-    gallery: "🖼️ <b>Галерея — ваша коллекция!</b><br>"
-        + "• Все работы сохраняются в браузере<br>"
-        + "• 🗑️ под картинкой — удалить одну<br>"
-        + "• Нажмите на картинку, чтобы рассмотреть поближе 🔍",
-    teapot: "🫖 <b>Секретик про чайник:</b><br>"
-        + "• Положите файл teapot.png (или .jpg/.gif) рядом с index.html<br>"
-        + "• И в пасхалке появится ВАША картинка ✨",
-    emoji: "😢 <b>Стикеры серые на ПК?</b><br>"
-        + "• Мы подключили цветные эмодзи Noto Color Emoji<br>"
-        + "• Нажмите Ctrl+F5, чтобы обновить<br>"
-        + "• Или замените эмодзи на свои картинки 🖼️",
-    design: "🎨 <b>Сделайте сайт своим!</b><br>"
-        + "• 6 тем + 8 дизайнов + 3 разрешения = 144 комбинации ✨<br>"
-        + "• Всё в настройках ⚙️"
+
+// =============================================
+
+        // =============================================
+// РЕСТАВРАТОР ФАСАДОВ — script.js (часть 2 из 3)
+// Контуры здания + реставрация + дружелюбный чат
+// =============================================
+
+// ===== ПАРАЛЛЕЛЬНАЯ ГОНКА МОДЕЛЕЙ =====
+function raceModels(prompt, models) {
+    return new Promise(function(resolve, reject) {
+        var pending = models.length;
+        var errors = [];
+        var settled = false;
+        models.forEach(function(model) {
+            generateViaPollinations(prompt, model)
+                .then(function(result) {
+                    if (!settled) { settled = true; resolve(result); }
+                })
+                .catch(function(e) {
+                    errors.push(model + ': ' + (e.message || 'ошибка'));
+                    pending--;
+                    if (pending === 0 && !settled) {
+                        settled = true;
+                        reject(new Error(errors.join('\n')));
+                    }
+                });
+        });
+    });
+}
+
+// ===== УМНАЯ ГЕНЕРАЦИЯ =====
+async function smartGenerate(prompt, preferHorde) {
+    await waitCooldown();
+    var diverse = addDiversity(prompt);
+    var errors = [];
+
+    if (STATE.selectedModel === 'horde' && !STATE.fastMode) {
+        try { return await generateViaHorde(diverse); }
+        catch (e) { errors.push('horde: ' + e.message); }
+    }
+
+    try {
+        return await raceModels(diverse, ['turbo', 'flux', 'sana']);
+    } catch (e) {
+        errors.push(e.message);
+    }
+
+    try { return await generateViaHorde(diverse); }
+    catch (e) { errors.push('horde: ' + e.message); }
+
+    throw new Error('Все модели недоступны:\n' + errors.join('\n') + '\n\nПодождите 15 секунд и попробуйте снова.');
+}
+
+// ===== АНАЛИЗ ФОТО (запасной вариант) =====
+function analyzeImage(base64Data) {
+    return new Promise(function(resolve) {
+        var img = new Image();
+        img.onload = function() {
+            var canvas = document.createElement('canvas');
+            canvas.width = 32; canvas.height = 32;
+            var ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, 32, 32);
+            var pixels = ctx.getImageData(0, 0, 32, 32).data;
+            var totalR = 0, totalG = 0, totalB = 0, count = 0;
+            for (var i = 0; i < pixels.length; i += 4) {
+                totalR += pixels[i]; totalG += pixels[i + 1]; totalB += pixels[i + 2]; count++;
+            }
+            var avgR = Math.round(totalR / count);
+            var avgG = Math.round(totalG / count);
+            var avgB = Math.round(totalB / count);
+            var lum = 0.299 * avgR + 0.587 * avgG + 0.114 * avgB;
+            var tone = 'soft natural light';
+            if (lum < 90) tone = 'dark moody atmosphere';
+            else if (lum > 170) tone = 'bright daylight';
+            var hue = 'gray weathered stone';
+            if (avgR > avgG + 20 && avgR > avgB + 20) hue = 'reddish brick walls';
+            else if (avgG > avgR + 10 && avgG > avgB + 10) hue = 'greenish overgrown facade';
+            else if (avgB > avgR + 10 && avgB > avgG + 10) hue = 'bluish stone facade';
+            else if (avgR > 150 && avgG > 130 && avgB < 100) hue = 'warm yellow plaster walls';
+            resolve(tone + ', ' + hue + ', aged texture, weathered surface');
+        };
+        img.onerror = function() { resolve('old building, weathered facade, aged texture'); };
+        img.src = base64Data;
+    });
+}
+
+// ===== РАСПОЗНАВАНИЕ КОНТУРОВ ЗДАНИЯ =====
+// Ищет границы (Собель), считает этажи и окна, определяет крышу и симметрию.
+// Превращает контуры в текстовый запрос для движков.
+function detectBuildingContours(base64Data) {
+    return new Promise(function(resolve) {
+        var img = new Image();
+        img.onload = function() {
+            try {
+                var W = 64, H = 64;
+                var c = document.createElement('canvas');
+                c.width = W; c.height = H;
+                var ctx = c.getContext('2d');
+                ctx.drawImage(img, 0, 0, W, H);
+                var d = ctx.getImageData(0, 0, W, H).data;
+
+                // яркость каждого пикселя
+                var gray = [];
+                for (var i = 0; i < W * H; i++) {
+                    gray.push(0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]);
+                }
+
+                // сила границ по строкам и столбцам
+                var rowEdge = new Array(H).fill(0);
+                var colEdge = new Array(W).fill(0);
+                for (var y = 1; y < H - 1; y++) {
+                    for (var x = 1; x < W - 1; x++) {
+                        var gx = -gray[(y-1)*W+(x-1)] - 2*gray[y*W+(x-1)] - gray[(y+1)*W+(x-1)]
+                                 + gray[(y-1)*W+(x+1)] + 2*gray[y*W+(x+1)] + gray[(y+1)*W+(x+1)];
+                        var gy = -gray[(y-1)*W+(x-1)] - 2*gray[(y-1)*W+x] - gray[(y-1)*W+(x+1)]
+                                 + gray[(y+1)*W+(x-1)] + 2*gray[(y+1)*W+x] + gray[(y+1)*W+(x+1)];
+                        var mag = Math.sqrt(gx * gx + gy * gy);
+                        if (mag > 60) {
+                            rowEdge[y] += Math.abs(gy);
+                            colEdge[x] += Math.abs(gx);
+                        }
+                    }
+                }
+
+                // этажи: горизонтальные линии в средней зоне
+                var midRows = rowEdge.slice(Math.floor(H * 0.25), Math.floor(H * 0.9));
+                var avgRow = midRows.reduce(function(a, b) { return a + b; }, 0) / midRows.length;
+                var floors = 1, above = false;
+                for (var r = 0; r < midRows.length; r++) {
+                    if (midRows[r] > avgRow * 1.4 && !above) { floors++; above = true; }
+                    else if (midRows[r] < avgRow) above = false;
+                }
+                if (floors > 6) floors = 6;
+
+                // окна: вертикальные линии
+                var avgCol = colEdge.reduce(function(a, b) { return a + b; }, 0) / W;
+                var winCols = 0; above = false;
+                for (var x2 = 0; x2 < W; x2++) {
+                    if (colEdge[x2] > avgCol * 1.3 && !above) { winCols++; above = true; }
+                    else if (colEdge[x2] < avgCol) above = false;
+                }
+
+                // крыша: границы в верхней четверти
+                var topEdge = 0;
+                for (var y3 = 0; y3 < Math.floor(H * 0.3); y3++) topEdge += rowEdge[y3];
+                var topAvg = topEdge / Math.max(1, Math.floor(H * 0.3));
+                var roof = topAvg > avgRow * 1.2 ? 'pointed roof' : 'flat roof';
+
+                // симметрия фасада
+                var symDiff = 0, symSum = 0;
+                for (var y4 = 0; y4 < H; y4++) {
+                    for (var x4 = 0; x4 < Math.floor(W / 2); x4++) {
+                        symDiff += Math.abs(gray[y4 * W + x4] - gray[y4 * W + (W - 1 - x4)]);
+                        symSum += gray[y4 * W + x4] + gray[y4 * W + (W - 1 - x4)];
+                    }
+                }
+                var symmetric = (symDiff / Math.max(1, symSum)) < 0.25;
+
+                // контуры → текстовый запрос
+                var tags = [floors + ' storey building', roof, 'clear building outline'];
+                if (winCols >= 3) tags.push('row of ' + winCols + ' windows');
+                if (symmetric) tags.push('symmetrical facade');
+                resolve(tags);
+            } catch (e) {
+                resolve(['building outline']);
+            }
+        };
+        img.onerror = function() { resolve(['building outline']); };
+        img.src = base64Data;
+    });
+}
+
+// ===== ПОДГОТОВКА ФОТО ДЛЯ IMG2IMG =====
+function prepareSourceBase64(base64Data) {
+    return new Promise(function(resolve) {
+        var img = new Image();
+        img.onload = function() {
+            var w = img.naturalWidth, h = img.naturalHeight;
+            if (!w || !h) { resolve(null); return; }
+            var max = 512;
+            var r = Math.min(max / w, max / h, 1);
+            w = Math.max(64, Math.round((w * r) / 64) * 64);
+            h = Math.max(64, Math.round((h * r) / 64) * 64);
+            var c = document.createElement('canvas');
+            c.width = w; c.height = h;
+            c.getContext('2d').drawImage(img, 0, 0, w, h);
+            resolve({
+                base64: c.toDataURL('image/jpeg', 0.85).split(',')[1],
+                width: w,
+                height: h
+            });
+        };
+        img.onerror = function() { resolve(null); };
+        img.src = base64Data;
+    });
+}
+
+// ===== СОХРАНЕНИЕ РЕЗУЛЬТАТА =====
+async function urlToStored(url) {
+    try {
+        var res = await fetch(url);
+        if (!res.ok) throw new Error('http');
+        var blob = await res.blob();
+        var dataUrl = await blobToDataUrl(blob);
+        return await downscale(dataUrl, 800);
+    } catch (e) {
+        return url;
+    }
+}
+
+// ===== НАСТОЯЩАЯ РЕСТАВРАЦИЯ: img2img =====
+async function restoreViaHordeImg2Img(source, prompt) {
+    var postResponse = await fetch('https://aihorde.net/api/v2/generate/async', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': '0000000000' },
+        body: JSON.stringify({
+            prompt: prompt + ', high quality, detailed',
+            params: {
+                width: source.width,
+                height: source.height,
+                steps: 18,
+                n: 1,
+                denoising_strength: 0.6,
+                cfg_scale: 7
+            },
+            source_image: source.base64,
+            source_processing: 'img2img',
+            models: ['stable_diffusion_2.1'],
+            nsfw: false
+        })
+    });
+    if (!postResponse.ok) throw new Error('Horde HTTP ' + postResponse.status);
+    var postData = await postResponse.json();
+    var jobId = postData.id;
+    if (!jobId) throw new Error('Horde: нет id задачи');
+
+    for (var attempt = 0; attempt < 60; attempt++) {
+        await sleep(3000);
+        var checkResponse = await fetch('https://aihorde.net/api/v2/generate/check/' + jobId);
+        var checkData = await checkResponse.json();
+        if (checkData.faulted) throw new Error('Horde: задача сломалась');
+        if (checkData.done) {
+            var statusResponse = await fetch('https://aihorde.net/api/v2/generate/status/' + jobId);
+            var statusData = await statusResponse.json();
+            if (statusData.generations && statusData.generations.length > 0 && statusData.generations[0].img) {
+                var stored = await urlToStored(statusData.generations[0].img);
+                return { url: stored, engine: 'horde-img2img' };
+            }
+            throw new Error('Horde: нет результата');
+        }
+    }
+    throw new Error('Horde: таймаут');
+}
+
+// ===== РЕСТАВРАЦИЯ (контуры + цензура + якорь) =====
+async function restoreBuilding(originalBase64, description, styleName) {
+    var styleDesc = STYLES[styleName] || '';
+    var personDetected = containsPersonWords(description);
+    var cleanDesc = personDetected ? '' : sanitizePrompt(description);
+    var descTags = extractEnglishTags(description);
+
+    // Распознаём контуры здания и превращаем их в запрос
+    var contourTags = await detectBuildingContours(originalBase64);
+
+    var prompt = [
+        'restored building facade',
+        contourTags.join(', '),
+        'same outline same silhouette as photo',
+        'repaired walls',
+        'intact complete windows with glass',
+        'clean restored facade',
+        'no damage no cracks no ruins no graffiti',
+        'people only as tiny distant silhouettes far away',
+        descTags.join(', '),
+        cleanDesc,
+        styleDesc,
+        'architectural photography'
+    ].filter(Boolean).join(', ');
+
+    // 1) Настоящий img2img: твоё фото = основа
+    var source = await prepareSourceBase64(originalBase64);
+    if (source) {
+        try {
+            return await restoreViaHordeImg2Img(source, prompt);
+        } catch (e) {
+            console.warn('img2img не сработал, запасной вариант:', e.message);
+        }
+    }
+
+    // 2) Запасной: контуры + текст идут в Sana/Flux/Turbo/Horde
+    var analysis = await analyzeImage(originalBase64);
+    return await smartGenerate(prompt + ', ' + analysis, false);
+}
+
+// ===== ЗВУК =====
+var AudioEngine = (function() {
+    var audioCtx = null;
+    function getCtx() {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        return audioCtx;
+    }
+    function playTone(freq, type, duration, volume) {
+        if (!STATE.soundEnabled) return;
+        try {
+            var c = getCtx(), osc = c.createOscillator(), gain = c.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, c.currentTime);
+            gain.gain.setValueAtTime(volume || 0.1, c.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + duration);
+            osc.connect(gain); gain.connect(c.destination);
+            osc.start(); osc.stop(c.currentTime + duration);
+        } catch (e) {}
+    }
+    return {
+        click: function() { playTone(800 + Math.random() * 400, 'sine', 0.08, 0.05); },
+        success: function() { playTone(523, 'triangle', 0.3); setTimeout(function() { playTone(659, 'triangle', 0.4); }, 150); },
+        error: function() { playTone(150, 'sawtooth', 0.5, 0.15); },
+        whistle: function() {
+            if (!STATE.soundEnabled) return;
+            try {
+                var c = getCtx(), o = c.createOscillator(), g = c.createGain();
+                o.frequency.setValueAtTime(880, c.currentTime);
+                o.frequency.exponentialRampToValueAtTime(1760, c.currentTime + 0.4);
+                g.gain.setValueAtTime(0.001, c.currentTime);
+                g.gain.linearRampToValueAtTime(0.3, c.currentTime + 0.1);
+                g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 1.2);
+                o.connect(g); g.connect(c.destination);
+                o.start(); o.stop(c.currentTime + 1.3);
+            } catch (e) {}
+        }
+    };
+})();
+
+// ===== ЧАТ ПОДДЕРЖКИ (понятно каждому, 7–70 лет) =====
+var CHAT_RESPONSES = {
+    alisa: "🤖 <b>Почему промпт от Алисы не подходит?</b><br>"
+        + "• Программе не хватает данных, чтобы понять чужой промпт 😔<br>"
+        + "• Алиса часто рассказывает про людей, а мы рисуем только здания<br>"
+        + "• Напиши своими словами, проще: какое здание, сколько этажей, какого цвета<br>"
+        + "• Пример: «двухэтажный дом с красной крышей и белыми окнами» — так получится отлично! 💛",
+    generate: "🌱 <b>Всё хорошо, просто подожди немного!</b><br>"
+        + "• Картинка рисуется от 10 до 60 секунд<br>"
+        + "• Торопишься? В настройках ⚙️ выбери «640» — будет быстрее<br>"
+        + "• Мы просим сразу трёх художников — кто первый нарисует, того и картинка ✨",
+    restore: "🏗️ <b>Как работает реставрация:</b><br>"
+        + "• Программа смотрит на твоё фото и находит контуры здания: этажи, окна, крышу<br>"
+        + "• Потом дорисовывает сломанные части, как реставратор в музее 🖌️<br>"
+        + "• Напиши простыми словами, что сломано — будет точнее<br>"
+        + "• Иногда нужно до 3 минут — пожалуйста, потерпи 💛",
+    slow: "⏳ <b>Понимаю, ждать скучно! Вот как ускорить:</b><br>"
+        + "• Настройки ⚙️ → разрешение «640»<br>"
+        + "• Модель «Turbo» — самая быстрая<br>"
+        + "• А пока ждёшь — потапкай хомяка 🐹, он даст монетки!",
+    diverse: "🎲 <b>Каждая картинка — другая!</b><br>"
+        + "• Программа сама выбирает свет, погоду и угол зрения<br>"
+        + "• Нажми кнопку ещё раз — и увидишь новый вариант 🌟",
+    censor: "🛡️ <b>Наш сайт — про здания!</b><br>"
+        + "• Если в тексте есть люди, программа их убирает<br>"
+        + "• Вместо людей рисует здание<br>"
+        + "• Разрешены только маленькие силуэты далеко-далеко 🏃‍♂️→🔍",
+    gallery: "🖼️ <b>Это твой альбом!</b><br>"
+        + "• Все картинки сохраняются на твоём устройстве<br>"
+        + "• 🗑️ — удалить одну, «Удалить всё» — очистить альбом<br>"
+        + "• Нажми на картинку — она станет большой 🔍",
+    teapot: "🫖 <b>Секретик!</b><br>"
+        + "• Положи файл teapot.png рядом с index.html<br>"
+        + "• И в секретном окошке появится твоя картинка ✨",
+    emoji: "😢 <b>Смайлики серые на компьютере?</b><br>"
+        + "• Нажми Ctrl+F5 — станут цветными<br>"
+        + "• Не помогло? Можно заменить их своими картинками 🖼️",
+    design: "🎨 <b>Сделай сайт своим!</b><br>"
+        + "• В настройках ⚙️ меняй цвет, стиль и размер<br>"
+        + "• Попробуй разные — всего 144 сочетания! ✨"
 };
 
 function handleChatQuestion(key) {
@@ -649,8 +909,6 @@ function handleChatQuestion(key) {
 }
 
 // ===== КОНЕЦ ЧАСТИ 2 ИЗ 3 =====
-
-// =============================================
 // РЕСТАВРАТОР ФАСАДОВ — script.js (часть 3 из 3)
 // =============================================
 
